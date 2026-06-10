@@ -1,0 +1,93 @@
+import { StyleSheet, Dimensions } from "react-native";
+import COLORS from "../../constants/colors";
+
+const { width, height } = Dimensions.get("window");
+
+const styles = StyleSheet.create({
+  container: {
+    flexGrow: 1,
+    justifyContent: "center",
+    padding: 20,
+    backgroundColor: COLORS.background,
+  },
+  scrollViewStyle: { alignItems: "center", backgroundColor: COLORS.background, },
+  topIllustration: { alignItems: "center", width: "100%", marginBottom: 8, },
+  illustrationImage: { width: width * 0.6, height: height * 0.28,},
+  card: {
+    backgroundColor: COLORS.cards,
+    borderRadius: 20,
+    padding: 28,
+    shadowColor: COLORS.black,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 5,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  header: { alignItems: "center", marginBottom: 24,},
+  title: {
+    fontSize: 26,
+    fontFamily: "GeneralSans-Variable",
+    color: COLORS.black,
+    textAlign: "center",
+    marginBottom: 4,
+    fontWeight: "600",
+  },
+  subtitle: {
+    fontSize: 14,
+    color: COLORS.placeholderText,
+    textAlign: "center",
+    marginBottom: 24,
+    fontFamily: "GeneralSans-Variable",
+  },
+  formContainer: { marginBottom: 8, },
+  inputGroup: { marginBottom: 16, },
+  label: { fontSize: 14, marginBottom: 8, color: COLORS.black, fontFamily: "GeneralSans-Variable", },
+  inputContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: COLORS.inputBackground,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingHorizontal: 14,
+  },
+  inputIcon: {
+    marginRight: 10,
+  },
+  input: {
+    flex: 1,
+    height: 50,
+    color: COLORS.black,
+    fontSize: 15,
+    fontFamily: "GeneralSans-Variable",
+  },
+  eyeIcon: {
+    padding: 8,
+  },
+  button: {
+    backgroundColor: COLORS.button,
+    borderRadius: 12,
+    height: 52,
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 8,
+    shadowColor: COLORS.button,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  buttonText: {
+    fontFamily: "GeneralSans-Variable",
+    color: COLORS.white,
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  footer: { flexDirection: "row", justifyContent: "center", marginTop: 24, },
+  footerText: { color: COLORS.placeholderText, marginRight: 5, fontFamily: "GeneralSans-Variable", },
+  link: { color: COLORS.button, fontWeight: "600", fontFamily: "GeneralSans-Variable", },
+});
+
+export default styles;
