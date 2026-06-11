@@ -11,7 +11,7 @@ import { View,
         } from 'react-native'
 import { useState } from 'react'
 import COLORS from "../../constants/colors"
-import styles from '../../assets/styles/profile.style';
+import styles from '../../assets/styles/onBoardingStyle/profile.style';
 import { router } from "expo-router";
 import api from '../../lib/axios';
 

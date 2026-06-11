@@ -14,7 +14,7 @@ import { useState } from 'react'
 import { Ionicons } from "@expo/vector-icons"
 import { useRouter } from 'expo-router';
 import COLORS from '../../constants/colors';
-import styles from '../../assets/styles/signup.style';
+import styles from '../../assets/styles/authStyle/signup.style';
 
 
 import {useAuthStore} from "../../store/authStore"
@@ -58,7 +58,7 @@ const result = await register(username, email, password);
               <TextInput
                 style={styles.input}
                 placeholder="Username"
-                placeholderTextColor={COLORS.placeholderText}
+                placeholderTextColor={COLORS.black}
                 onChangeText={setUsername} 
                 value={username}
                 autoCapitalize="none"
@@ -79,7 +79,7 @@ const result = await register(username, email, password);
               style={styles.input}
               placeholder="Email"
               value={email}
-              placeholderTextColor={COLORS.placeholderText}
+              placeholderTextColor={COLORS.black}
               onChangeText={setEmail}
               keyboardType="email-address"
               autoCapitalize="none"
@@ -99,7 +99,7 @@ const result = await register(username, email, password);
             <TextInput
               style={styles.input}
               placeholder="Password"
-              placeholderTextColor={COLORS.placeholderText}
+              placeholderTextColor={COLORS.black}
               value={password}
               onChangeText={setPassword}
               secureTextEntry={!showPassword}

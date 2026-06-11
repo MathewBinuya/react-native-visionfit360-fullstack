@@ -7,7 +7,7 @@ const COLORS = {
   button: "#111111",
   placeholderText: "##BBBBC0",
   white: "#FFFFFF",
-  black: "000000"
+  black: "#000000"
 }
 
 

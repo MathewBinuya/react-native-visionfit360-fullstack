@@ -4,7 +4,7 @@ import { router } from 'expo-router'
 import { Ionicons } from "@expo/vector-icons"
 import * as ImagePicker from "expo-image-picker"
 import COLORS from "../../constants/colors"
-import styles from '../../assets/styles/account.style'
+import styles from '../../assets/styles/tabStyle/account.style'
 import api from '../../lib/axios'
 import { useAuthStore } from '../../store/authStore'
 

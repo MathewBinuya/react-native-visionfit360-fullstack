@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { router, useFocusEffect } from 'expo-router'
 import { Ionicons } from "@expo/vector-icons"
 import COLORS from "../../constants/colors"
-import styles from '../../assets/styles/home.style'
+import styles from '../../assets/styles/tabStyle/home.style'
 import api from '../../lib/axios'
 import { useAuthStore } from '../../store/authStore'
 
@@ -87,11 +87,10 @@ export default function Home() {
           <Text style={styles.username}>{user?.username || "there"}</Text>
         </View>
         <View style={styles.topBarRight}>
-          {/* Notifications bell — parked until dev build is set up
+          {/* Notifications bell — parked until dev build is set up */}
           <TouchableOpacity onPress={() => router.push("/notifications")} style={styles.bellBtn}>
             <Ionicons name="notifications-outline" size={24} color={COLORS.black} />
           </TouchableOpacity>
-          */}
           <TouchableOpacity
             style={styles.avatar}
             onPress={() => router.push("/(tabs)/profile")}
@@ -151,11 +150,14 @@ export default function Home() {
 
         {/* AR Camera (placeholder) + History (functional) */}
         <View style={styles.placeholderRow}>
-          <View style={styles.placeholder}>
-            <Ionicons name="camera-outline" size={24} color={COLORS.placeholderText} />
-            <Text style={styles.placeholderLabel}>AR Camera</Text>
-            <Text style={styles.placeholderSub}>Coming soon</Text>
-          </View>
+        <TouchableOpacity
+            style={styles.placeholder}
+            onPress={() => router.push("/ar-select")}
+        >
+            <Ionicons name="body-outline" size={24} color={COLORS.button} />
+            <Text style={styles.placeholderLabel}>AR Tracker</Text>
+            <Text style={styles.placeholderSub}>Camera workouts</Text>
+        </TouchableOpacity>
           <TouchableOpacity
             style={styles.historyButton}
             onPress={() => router.push("/history")}

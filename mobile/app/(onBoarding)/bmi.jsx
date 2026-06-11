@@ -8,7 +8,7 @@ import { View,
 import { useState, useEffect } from 'react'
 import { router } from 'expo-router'
 import COLORS from "../../constants/colors"
-import styles from '../../assets/styles/bmi.style'
+import styles from '../../assets/styles/onBoardingStyle/bmi.style'
 import api from '../../lib/axios'
 import { useAuthStore } from '../../store/authStore'
 

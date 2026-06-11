@@ -2,7 +2,7 @@ import { View, Text, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingVi
 import { useState, useEffect, useRef } from 'react'
 import { Ionicons } from "@expo/vector-icons"
 import COLORS from "../../constants/colors"
-import styles from '../../assets/styles/ai.style'
+import styles from '../../assets/styles/tabStyle/ai.style'
 import api from '../../lib/axios'
 
 export default function AICoach() {
@@ -66,7 +66,7 @@ export default function AICoach() {
           <Ionicons name="sparkles" size={20} color={COLORS.white} />
         </View>
         <View>
-          <Text style={styles.headerTitle}>AI Coach</Text>
+          <Text style={styles.headerTitle}>Smart Plan</Text>
           <Text style={styles.headerSub}>Your personal fitness guide</Text>
         </View>
       </View>
@@ -110,7 +110,7 @@ export default function AICoach() {
         <TextInput
           style={styles.input}
           placeholder="Ask your coach..."
-          placeholderTextColor={COLORS.placeholderText}
+          placeholderTextColor={COLORS.black}
           value={input}
           onChangeText={setInput}
           multiline

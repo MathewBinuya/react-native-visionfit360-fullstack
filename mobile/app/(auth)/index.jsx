@@ -15,7 +15,7 @@ import { Link } from 'expo-router'
 import { router } from "expo-router";
 import React, { useState } from 'react'
 import { Ionicons } from "@expo/vector-icons"
-import styles from '../../assets/styles/login.style'
+import styles from '../../assets/styles/authStyle/login.style'
 import COLORS from '../../constants/colors'
 
 import {useAuthStore} from "../../store/authStore"
@@ -79,7 +79,7 @@ const handleLogin = async () => {
               <TextInput 
                 style={styles.input}
                 placeholder="Enter your email"
-                placeholderTextColor={COLORS.placeholderText}
+                placeholderTextColor={COLORS.black}
                 value={email}
                 onChangeText={setEmail}
                 keyboardType="email-address"
@@ -100,7 +100,7 @@ const handleLogin = async () => {
                   <TextInput
                     style={styles.input}
                     placeholder="Enter your password"
-                    placeholderTextColor={COLORS.placeholderText}
+                    placeholderTextColor={COLORS.black}
                     value={password}
                     onChangeText={setPassword}
                     secureTextEntry={!showPassword}

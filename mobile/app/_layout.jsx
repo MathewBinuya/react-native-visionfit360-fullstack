@@ -21,7 +21,9 @@ export default function RootLayout() {
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="workout" />
           <Stack.Screen name="getstarted" />
-          {/* <Stack.Screen name="notifications" /> */}
+          <Stack.Screen name="notifications" />
+          <Stack.Screen name="ar-select" />
+          <Stack.Screen name="posetracker" />
 
           
         </Stack>
