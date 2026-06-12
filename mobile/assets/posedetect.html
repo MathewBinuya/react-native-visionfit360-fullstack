@@ -7,6 +7,7 @@
     #hud { position: absolute; top: 20px; left: 0; right: 0; z-index: 10; text-align: center; color: #fff; font-family: sans-serif; }
     #repcount { font-size: 64px; font-weight: bold; }
     #status { font-size: 18px; }
+    #debug { font-size: 16px; color: #FFD700; margin-top: 8px; font-weight: bold; }
     #wrap { position: relative; width: 100vw; height: 100vh; }
     video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
     video { transform: scaleX(-1); }
@@ -17,6 +18,7 @@
   <div id="hud">
     <div id="repcount">0</div>
     <div id="status">Loading model...</div>
+    <div id="debug">--</div>
   </div>
   <div id="wrap">
     <video id="video" autoplay playsinline></video>
@@ -27,20 +29,8 @@
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
   <script>
     function send(obj) {
-      if (window.ReactNativeWebView) {
-        window.ReactNativeWebView.postMessage(JSON.stringify(obj));
-      }
-      if (obj.type === 'counter') {
-        document.getElementById('repcount').textContent = obj.current_count;
-      } else if (obj.type === 'posture') {
-        const s = document.getElementById('status');
-        s.textContent = obj.message;
-        s.style.color = obj.correct ? '#5DCAA5' : '#F09595';
-      } else if (obj.type === 'ready') {
-        document.getElementById('status').textContent = 'Ready — start squatting';
-      } else if (obj.type === 'error') {
-        document.getElementById('status').textContent = 'Error: ' + obj.message;
-      }
+      if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(obj));
+      if (obj.type === 'counter') document.getElementById('repcount').textContent = obj.current_count;
     }
 
     const params = new URLSearchParams(window.location.search);
@@ -49,87 +39,141 @@
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
+    const debugEl = document.getElementById('debug');
+    const statusEl = document.getElementById('status');
 
-    let detector = null;
-    let count = 0;
-    let stage = 'up';
-    let formIsGood = true;
+    let detector = null, count = 0, stage = 'up', formIsGood = true, lastAngle = 180;
+    const MIN_SCORE = 0.2;
 
+    const CONNECTIONS = [
+      ['left_shoulder','right_shoulder'],['left_shoulder','left_elbow'],['left_elbow','left_wrist'],
+      ['right_shoulder','right_elbow'],['right_elbow','right_wrist'],
+      ['left_shoulder','left_hip'],['right_shoulder','right_hip'],['left_hip','right_hip'],
+      ['left_hip','left_knee'],['left_knee','left_ankle'],
+      ['right_hip','right_knee'],['right_knee','right_ankle'],
+    ];
+
+    //   shared helpers 
     function angle(a, b, c) {
       const ab = { x: a.x - b.x, y: a.y - b.y };
       const cb = { x: c.x - b.x, y: c.y - b.y };
       const dot = ab.x * cb.x + ab.y * cb.y;
-      const magAB = Math.sqrt(ab.x * ab.x + ab.y * ab.y);
-      const magCB = Math.sqrt(cb.x * cb.x + cb.y * cb.y);
-      return Math.acos(dot / (magAB * magCB)) * (180 / Math.PI);
+      const magAB = Math.sqrt(ab.x*ab.x + ab.y*ab.y);
+      const magCB = Math.sqrt(cb.x*cb.x + cb.y*cb.y);
+      if (magAB === 0 || magCB === 0) return lastAngle;
+      let cos = dot / (magAB * magCB);
+      cos = Math.max(-1, Math.min(1, cos));
+      return Math.acos(cos) * (180 / Math.PI);
+    }
+    function kp(keypoints, name) { return keypoints.find(k => k.name === name); }
+
+    let smoothHistory = [];
+    function smooth(val) {
+      smoothHistory.push(val);
+      if (smoothHistory.length > 5) smoothHistory.shift();
+      return smoothHistory.reduce((a, b) => a + b, 0) / smoothHistory.length;
     }
 
-    function kp(keypoints, name) {
-      return keypoints.find(k => k.name === name);
-    }
-
-    function checkSquat(keypoints) {
-      const hip = kp(keypoints, 'left_hip');
-      const knee = kp(keypoints, 'left_knee');
-      const ankle = kp(keypoints, 'left_ankle');
-      const shoulder = kp(keypoints, 'left_shoulder');
-
-      if (!hip || !knee || !ankle || !shoulder) { formIsGood = false; return; }
-      if (hip.score < 0.3 || knee.score < 0.3 || ankle.score < 0.3) { formIsGood = false; return; }
-
-      const kneeAngle = angle(hip, knee, ankle);
-      const backAngle = angle(shoulder, hip, knee);
-      const backOk = backAngle > 60;
-      formIsGood = backOk;
-
-      send({ type: 'posture', message: backOk ? 'Good form' : 'Keep your back straighter', correct: backOk });
-
-      if (kneeAngle < 100 && stage === 'up' && backOk) {
+    // generic rep counter using a primary angle + down/up thresholds
+    function countRep(primaryAngle, downThreshold, upThreshold) {
+      if (primaryAngle < downThreshold && stage === 'up') {
         stage = 'down';
       }
-      if (kneeAngle > 160 && stage === 'down') {
+      if (primaryAngle > upThreshold && stage === 'down') {
         stage = 'up';
         count++;
         send({ type: 'counter', current_count: count });
+        statusEl.textContent = 'REP ' + count + '!';
+        statusEl.style.color = '#5DCAA5';
       }
     }
 
-    async function detectLoop() {
+    // =====================================================================
+    // EXERCISE REGISTRY — to add an exercise, add one entry here.
+    // Each exercise has a detect(keypoints) function that:
+    //   - computes its angle(s)
+    //   - sets formIsGood (green/red)
+    //   - calls countRep(...)
+    //   - updates debugEl
+    // =====================================================================
+    const EXERCISES = {
+
+      squat: function (keypoints) {
+        const hip = kp(keypoints, 'left_hip');
+        const knee = kp(keypoints, 'left_knee');
+        const ankle = kp(keypoints, 'left_ankle');
+        const shoulder = kp(keypoints, 'left_shoulder');
+        if (!(hip && knee && ankle)) { debugEl.textContent = 'legs unclear'; return; }
+
+        const kneeAngle = smooth(angle(hip, knee, ankle));
+        lastAngle = kneeAngle;
+        const backAngle = shoulder ? angle(shoulder, hip, knee) : 180;
+
+        formIsGood = (stage === 'down') ? (backAngle > 45) : true;
+
+        debugEl.textContent = 'KNEE:' + Math.round(kneeAngle) + ' BACK:' + Math.round(backAngle) + ' ' + stage + ' reps:' + count;
+        countRep(kneeAngle, 130, 150);
+      },
+
+      // ---- TEMPLATE for the next exercise (copy, rename, fill in) ----
+      // pushup: function (keypoints) {
+      //   const shoulder = kp(keypoints, 'left_shoulder');
+      //   const elbow = kp(keypoints, 'left_elbow');
+      //   const wrist = kp(keypoints, 'left_wrist');
+      //   if (!(shoulder && elbow && wrist)) { debugEl.textContent = 'arms unclear'; return; }
+      //   const elbowAngle = smooth(angle(shoulder, elbow, wrist));
+      //   lastAngle = elbowAngle;
+      //   formIsGood = true;
+      //   debugEl.textContent = 'ELBOW:' + Math.round(elbowAngle) + ' ' + stage + ' reps:' + count;
+      //   countRep(elbowAngle, 90, 160);   // tune thresholds when testing
+      // },
+
+    };
+
+    async function runDetection() {
       if (detector && video.readyState === 4) {
         const poses = await detector.estimatePoses(video);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         if (poses.length > 0) {
           const keypoints = poses[0].keypoints;
-          ctx.fillStyle = formIsGood ? '#1D9E75' : '#E24B4A';
-          keypoints.forEach(k => {
-            if (k.score > 0.3) {
-              ctx.beginPath();
-              ctx.arc(k.x, k.y, 6, 0, 2 * Math.PI);
-              ctx.fill();
+
+          // run the selected exercise's logic (if it exists)
+          const detect = EXERCISES[exercise];
+          if (detect) detect(keypoints);
+          else debugEl.textContent = 'Unknown exercise: ' + exercise;
+
+          const color = formIsGood ? '#1D9E75' : '#E24B4A';
+          ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 4;
+          CONNECTIONS.forEach(([a, b]) => {
+            const p1 = kp(keypoints, a), p2 = kp(keypoints, b);
+            if (p1 && p2 && p1.score > MIN_SCORE && p2.score > MIN_SCORE) {
+              ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
             }
           });
-          if (exercise === 'squat') checkSquat(keypoints);
+          keypoints.forEach(k => {
+            if (k.score > MIN_SCORE) { ctx.beginPath(); ctx.arc(k.x, k.y, 6, 0, 2*Math.PI); ctx.fill(); }
+          });
         }
       }
-      requestAnimationFrame(detectLoop);
     }
 
     async function init() {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false
+        });
         video.srcObject = stream;
         await new Promise(r => { video.onloadedmetadata = r; });
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
+        canvas.width = video.videoWidth; canvas.height = video.videoHeight;
         await tf.ready();
         detector = await poseDetection.createDetector(
           poseDetection.SupportedModels.MoveNet,
           { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING }
         );
-        send({ type: 'ready' });
-        detectLoop();
+        statusEl.textContent = 'Get into position';
+        setInterval(runDetection, 100);
       } catch (err) {
-        send({ type: 'error', message: err.message });
+        debugEl.textContent = 'Error: ' + err.message;
       }
     }
     init();

@@ -5,11 +5,9 @@ import COLORS from "../constants/colors"
 import styles from '../assets/styles/arselect.style'
 import { AR_EXERCISES } from '../lib/exercises'
 
-
 export default function ArSelect() {
   return (
     <View style={styles.container}>
-      {/* header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color={COLORS.black} />
@@ -24,12 +22,14 @@ export default function ArSelect() {
         {AR_EXERCISES.map((ex) => (
           <TouchableOpacity
             key={ex.key}
-            style={styles.card}
+            style={[styles.card, ex.working === false && { opacity: 0.5 }]}
+            disabled={ex.working === false}
             onPress={() => router.push(`/posetracker?exercise=${ex.key}`)}
           >
             <Ionicons name={ex.icon} size={30} color={COLORS.button} />
             <Text style={styles.cardLabel}>{ex.label}</Text>
             <Text style={styles.cardGroup}>{ex.group}</Text>
+            {ex.working === false && <Text style={styles.soon}>Coming soon</Text>}
           </TouchableOpacity>
         ))}
       </ScrollView>

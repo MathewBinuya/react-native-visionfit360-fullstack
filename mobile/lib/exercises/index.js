@@ -1,15 +1,26 @@
-import pushup from "./pushup";
-// import squat from "./squat";   // add as you create them
-// import lunge from "./lunge";
-// import plank from "./plank";
+// AR exercises shown on the selection screen.
+// This is just the MENU DATA (which buttons appear).
+// The actual detection logic lives in assets/posedetect.html (the EXERCISES registry).
+//
+// `key` MUST match the exercise name in posedetect.html.
 
-// the master list the AR select screen reads
 export const AR_EXERCISES = [
-  pushup,
-  // squat,
-  // lunge,
-  // plank,
-];
+  {
+    key: "squat",
+    label: "Squats",
+    group: "Legs",
+    icon: "body-outline",
+    targetReps: 10,
+    working: true,
+  },
 
-// quick lookup by key (used by the tracker screen)
-export const getExercise = (key) => AR_EXERCISES.find((e) => e.key === key);
+  // --- Add more exercises below as you build their logic in posedetect.html ---
+  // {
+  //   key: "pushup",
+  //   label: "Push-ups",
+  //   group: "Chest",
+  //   icon: "fitness-outline",
+  //   targetReps: 10,
+  //   working: false,
+  // },
+];

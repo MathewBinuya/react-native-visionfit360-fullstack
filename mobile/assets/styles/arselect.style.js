@@ -49,6 +49,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontFamily: "GeneralSans-Variable",
   },
+  soon: { fontSize: 10, color: COLORS.placeholderText, marginTop: 2, fontFamily: "GeneralSans-Variable" },
 });
 
 export default styles;
