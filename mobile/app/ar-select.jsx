@@ -8,6 +8,7 @@ import { AR_EXERCISES } from '../lib/exercises'
 export default function ArSelect() {
   return (
     <View style={styles.container}>
+      {/* header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color={COLORS.black} />

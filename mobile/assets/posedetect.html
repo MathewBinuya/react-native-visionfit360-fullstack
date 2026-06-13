@@ -97,7 +97,8 @@
     //   - updates debugEl
     // =====================================================================
     const EXERCISES = {
-
+      
+      // SQUATS
       squat: function (keypoints) {
         const hip = kp(keypoints, 'left_hip');
         const knee = kp(keypoints, 'left_knee');
@@ -113,7 +114,216 @@
 
         debugEl.textContent = 'KNEE:' + Math.round(kneeAngle) + ' BACK:' + Math.round(backAngle) + ' ' + stage + ' reps:' + count;
         countRep(kneeAngle, 130, 150);
+
       },
+
+
+      // BICEPCURLS
+      bicepcurl: function (keypoints) {
+        const shoulder = kp(keypoints, 'left_shoulder');
+        const elbow = kp(keypoints, 'left_elbow');
+        const wrist = kp(keypoints, 'left_wrist');
+        if (!(shoulder && elbow && wrist)) { debugEl.textContent = 'arm unclear — show your arm'; return; }
+
+        const elbowAngle = smooth(angle(shoulder, elbow, wrist));
+        lastAngle = elbowAngle;
+
+        // form: keep upper arm still — we keep it simple (always green for now)
+        formIsGood = true;
+
+        debugEl.textContent = 'ELBOW:' + Math.round(elbowAngle) + ' ' + stage + ' reps:' + count;
+
+        // arm straight (angle high ~160+) = "up"/extended
+        // arm curled (angle low ~50) = "down"/contracted
+        // rep = curl up then extend back
+        countRep(elbowAngle, 60, 150);
+      },
+
+
+      // LATERAL RAISES
+      lateralraise: function (keypoints) {
+        const hip = kp(keypoints, 'left_hip');
+        const shoulder = kp(keypoints, 'left_shoulder');
+        const wrist = kp(keypoints, 'left_wrist');
+        if (!(hip && shoulder && wrist)) { debugEl.textContent = 'arm unclear — show your side'; return; }
+
+        // angle at the shoulder: hip-shoulder-wrist
+        // arm down at side = small angle (~10-20°), arm raised to shoulder height = large (~80-100°)
+        const armAngle = smooth(angle(hip, shoulder, wrist));
+        lastAngle = armAngle;
+
+        formIsGood = true;
+
+        debugEl.textContent = 'ARM:' + Math.round(armAngle) + ' ' + stage + ' reps:' + count;
+
+        // raise up (angle high ~75+) then lower (angle low ~30) = 1 rep
+        // note: thresholds are flipped vs curl because "up" here = HIGH angle
+        if (armAngle > 75 && stage === 'up') {
+          stage = 'down';   // reusing stage: "down" = arm raised
+        }
+        if (armAngle < 30 && stage === 'down') {
+          stage = 'up';
+          count++;
+          send({ type: 'counter', current_count: count });
+          statusEl.textContent = 'REP ' + count + '!';
+          statusEl.style.color = '#5DCAA5';
+        }
+      },
+
+      // SHOULDER PRESS (overhead press)
+      shoulderpress: function (keypoints) {
+        const shoulder = kp(keypoints, 'left_shoulder');
+        const elbow = kp(keypoints, 'left_elbow');
+        const wrist = kp(keypoints, 'left_wrist');
+        if (!(shoulder && elbow && wrist)) { debugEl.textContent = 'arm unclear — face camera'; return; }
+
+        // elbow angle: bent (hands at shoulders) = small (~70°), pressed overhead (arms straight) = large (~170°)
+        const elbowAngle = smooth(angle(shoulder, elbow, wrist));
+        lastAngle = elbowAngle;
+        formIsGood = true;
+
+        debugEl.textContent = 'ELBOW:' + Math.round(elbowAngle) + ' ' + stage + ' reps:' + count;
+
+        // start bent (low angle), press up (high angle), back to bent = 1 rep
+        // "up" stage = arms bent/down position; press to straight then return
+        if (elbowAngle > 150 && stage === 'up') {
+          stage = 'down';     // "down" here = arms pressed overhead (straight)
+        }
+        if (elbowAngle < 90 && stage === 'down') {
+          stage = 'up';
+          count++;
+          send({ type: 'counter', current_count: count });
+          statusEl.textContent = 'REP ' + count + '!';
+          statusEl.style.color = '#5DCAA5';
+        }
+      },
+
+
+      // JUMPING JACKS
+      jumpingjack: function (keypoints) {
+        const leftWrist = kp(keypoints, 'left_wrist');
+        const rightWrist = kp(keypoints, 'right_wrist');
+        const nose = kp(keypoints, 'nose');
+        const leftAnkle = kp(keypoints, 'left_ankle');
+        const rightAnkle = kp(keypoints, 'right_ankle');
+        const leftHip = kp(keypoints, 'left_hip');
+        const rightHip = kp(keypoints, 'right_hip');
+        if (!(leftWrist && rightWrist && nose && leftAnkle && rightAnkle && leftHip && rightHip)) {
+          debugEl.textContent = 'show your WHOLE body (head to feet)';
+          return;
+        }
+
+        // 1. are both hands above the head?
+        const handsUp = (leftWrist.y < nose.y) && (rightWrist.y < nose.y);
+
+        // 2. are the feet spread WIDER than the hips? (legs apart)
+        const ankleSpread = Math.abs(leftAnkle.x - rightAnkle.x);
+        const hipSpread = Math.abs(leftHip.x - rightHip.x);
+        const legsApart = ankleSpread > hipSpread * 1.5;   // feet noticeably wider than hips
+
+        // a real jumping jack = hands up AND legs apart at the same time
+        const jackOpen = handsUp && legsApart;
+        formIsGood = true;
+
+        debugEl.textContent = 'hands:' + handsUp + ' legs:' + legsApart + ' ' + stage + ' reps:' + count;
+
+        if (jackOpen && stage === 'up') {
+          stage = 'down';   // "down" = full open jack position
+        }
+        if (!handsUp && !legsApart && stage === 'down') {
+          stage = 'up';
+          count++;
+          send({ type: 'counter', current_count: count });
+          statusEl.textContent = 'REP ' + count + '!';
+          statusEl.style.color = '#5DCAA5';
+        }
+      },
+
+      // HIGH KNEES (count each time a knee lifts to hip height)
+      highknees: function (keypoints) {
+        const leftHip = kp(keypoints, 'left_hip');
+        const rightHip = kp(keypoints, 'right_hip');
+        const leftKnee = kp(keypoints, 'left_knee');
+        const rightKnee = kp(keypoints, 'right_knee');
+        if (!(leftHip && rightHip && leftKnee && rightKnee)) {
+          debugEl.textContent = 'show your full body';
+          return;
+        }
+
+        // a knee is "up" when it rises near hip height (smaller Y = higher on screen)
+        const hipY = (leftHip.y + rightHip.y) / 2;
+        const leftKneeUp = leftKnee.y < hipY + 60;    // left knee near/above hip level
+        const rightKneeUp = rightKnee.y < hipY + 60;
+
+        const aKneeIsUp = leftKneeUp || rightKneeUp;
+        formIsGood = true;
+
+        debugEl.textContent = 'L:' + leftKneeUp + ' R:' + rightKneeUp + ' ' + stage + ' reps:' + count;
+
+        // count each knee-lift: knee goes up (down state), then back down (up state) = 1 rep
+        if (aKneeIsUp && stage === 'up') {
+          stage = 'down';   // "down" = a knee is raised
+        }
+        if (!aKneeIsUp && stage === 'down') {
+          stage = 'up';
+          count++;
+          send({ type: 'counter', current_count: count });
+          statusEl.textContent = 'REP ' + count + '!';
+          statusEl.style.color = '#5DCAA5';
+        }
+      },
+
+      // FRONT RAISES (raise arms straight forward to shoulder height)
+      frontraise: function (keypoints) {
+        const hip = kp(keypoints, 'left_hip');
+        const shoulder = kp(keypoints, 'left_shoulder');
+        const elbow = kp(keypoints, 'left_elbow');
+        const wrist = kp(keypoints, 'left_wrist');
+        if (!(hip && shoulder && elbow && wrist)) { debugEl.textContent = 'face camera — show your full arm'; return; }
+
+        // shoulder angle (hip-shoulder-wrist): how high the arm is raised
+        const armAngle = smooth(angle(hip, shoulder, wrist));
+        lastAngle = armAngle;
+
+        // elbow angle (shoulder-elbow-wrist): is the arm STRAIGHT?
+        const elbowAngle = angle(shoulder, elbow, wrist);
+        const armStraight = elbowAngle > 150;   // near 180 = straight; bent = lower
+
+        // form: arm must be straight to count as a proper front raise
+        formIsGood = armStraight;
+
+        debugEl.textContent = 'ARM:' + Math.round(armAngle) + ' ELBOW:' + Math.round(elbowAngle)
+          + (armStraight ? ' straight' : ' BENT') + ' ' + stage + ' reps:' + count;
+
+        // only progress the rep if the arm is straight (ignores bent-elbow hand-lifts)
+        if (armAngle > 70 && armStraight && stage === 'up') {
+          stage = 'down';   // "down" = arm properly raised
+        }
+        if (armAngle < 30 && stage === 'down') {
+          stage = 'up';
+          count++;
+          send({ type: 'counter', current_count: count });
+          statusEl.textContent = 'REP ' + count + '!';
+          statusEl.style.color = '#5DCAA5';
+        }
+      },
+
+
+
+      
+
+
+
+
+
+
+
+
+
+
+
+
+
 
       // ---- TEMPLATE for the next exercise (copy, rename, fill in) ----
       // pushup: function (keypoints) {
