@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, ActivityIndicator, Alert } from 'react-native'
+import { View, Text, TouchableOpacity, ActivityIndicator, Alert, Modal } from 'react-native'
 import { useState, useEffect } from 'react'
 import { router, useLocalSearchParams } from 'expo-router'
 import { WebView } from 'react-native-webview'
@@ -7,6 +7,7 @@ import { Ionicons } from "@expo/vector-icons"
 import COLORS from "../constants/colors"
 import styles from '../assets/styles/posetracker.style'
 import api from '../lib/axios'
+import { AR_EXERCISES } from '../lib/exercises'
 
 export default function PoseTracker() {
   const { exercise = "squat" } = useLocalSearchParams();
@@ -16,6 +17,10 @@ export default function PoseTracker() {
   const [posture, setPosture] = useState("");
   const [formGood, setFormGood] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [showTips, setShowTips] = useState(false);   // ← for the help modal
+
+  // find this exercise's data (for the tips)
+  const exData = AR_EXERCISES.find((e) => e.key === exercise);
 
   // load the bundled HTML file
   useEffect(() => {
@@ -71,8 +76,11 @@ export default function PoseTracker() {
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color={COLORS.black} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>AR — {exercise}</Text>
-        <View style={{ width: 24 }} />
+        <Text style={styles.headerTitle}>RepVision — {exercise}</Text>
+        {/* help icon — re-shows the tips */}
+        <TouchableOpacity onPress={() => setShowTips(true)}>
+          <Ionicons name="help-circle-outline" size={24} color={COLORS.black} />
+        </TouchableOpacity>
       </View>
 
       <View style={[
@@ -115,6 +123,28 @@ export default function PoseTracker() {
       >
         <Text style={styles.finishText}>{saving ? "Saving..." : "Finish & Save"}</Text>
       </TouchableOpacity>
+
+      {/* TIPS MODAL — opens when help icon tapped */}
+      <Modal visible={showTips} transparent animationType="fade" onRequestClose={() => setShowTips(false)}>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", padding: 30 }}>
+          <View style={{ backgroundColor: COLORS.cards, borderRadius: 16, padding: 20 }}>
+            <Text style={{ fontSize: 18, fontWeight: "700", color: COLORS.black, marginBottom: 12, fontFamily: "GeneralSans-Variable" }}>
+              {exData?.label || "Exercise"} — Tips
+            </Text>
+            {exData?.tips?.map((tip, i) => (
+              <Text key={i} style={{ fontSize: 14, color: COLORS.black, marginBottom: 8, lineHeight: 20, fontFamily: "GeneralSans-Variable" }}>
+                • {tip}
+              </Text>
+            ))}
+            <TouchableOpacity
+              style={{ backgroundColor: COLORS.button, borderRadius: 10, padding: 12, alignItems: "center", marginTop: 10 }}
+              onPress={() => setShowTips(false)}
+            >
+              <Text style={{ color: COLORS.white, fontWeight: "600", fontFamily: "GeneralSans-Variable" }}>Got it</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }

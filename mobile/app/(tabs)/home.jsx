@@ -155,8 +155,8 @@ export default function Home() {
             onPress={() => router.push("/ar-select")}
         >
             <Ionicons name="body-outline" size={24} color={COLORS.button} />
-            <Text style={styles.placeholderLabel}>AR Tracker</Text>
-            <Text style={styles.placeholderSub}>Camera workouts</Text>
+            <Text style={styles.placeholderLabel}>RepVision</Text>
+            <Text style={styles.placeholderSub}>AR rep counter</Text>
         </TouchableOpacity>
           <TouchableOpacity
             style={styles.historyButton}

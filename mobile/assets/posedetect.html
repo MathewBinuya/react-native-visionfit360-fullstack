@@ -53,6 +53,12 @@
       ['right_hip','right_knee'],['right_knee','right_ankle'],
     ];
 
+    // for push detection
+    let ready = false;
+    let headMax = 0;
+    let headMin = 9999; 
+
+
     //   shared helpers 
     function angle(a, b, c) {
       const ab = { x: a.x - b.x, y: a.y - b.y };
@@ -308,7 +314,197 @@
         }
       },
 
+      // PUSH-UPS — counts on HEAD drop (the signal that tracks well when horizontal)
+      pushup: function (keypoints) {
+        const shoulder = kp(keypoints, 'left_shoulder');
+        const wrist = kp(keypoints, 'left_wrist');
+        const nose = kp(keypoints, 'nose');
+        if (!(shoulder && nose)) { debugEl.textContent = 'show your head & shoulders'; return; }
 
+        // head height relative to wrist (or shoulder if no wrist): drops when you lower
+        const ref = wrist ? wrist.y : (shoulder.y + 200);
+        const headHeight = smooth(ref - nose.y);   // big = up, small = lowered
+        lastAngle = headHeight;
+        formIsGood = true;
+
+        if (headHeight > headMax) headMax = headHeight;
+        if (headHeight < headMin) headMin = headHeight;
+        const range = headMax - headMin;
+
+        debugEl.textContent = 'HEAD:' + Math.round(headHeight) + ' [' + Math.round(headMin) + '-' + Math.round(headMax) + '] ' + stage + ' reps:' + count;
+
+        if (range < 40) { statusEl.textContent = 'Do one full push-up to calibrate'; return; }
+
+        const downThresh = headMin + range * 0.4;
+        const upThresh = headMax - range * 0.4;
+
+        if (headHeight < downThresh && stage === 'up') {
+          stage = 'down';
+          statusEl.textContent = 'UP — push!';
+        }
+        if (headHeight > upThresh && stage === 'down') {
+          stage = 'up';
+          count++;
+          send({ type: 'counter', current_count: count });
+          statusEl.textContent = 'REP ' + count + '!';
+        }
+      },
+
+
+      // SIDE LEG RAISES (either leg) — with diagnostic
+      sidelegraise: function (keypoints) {
+        const leftAnkle = kp(keypoints, 'left_ankle');
+        const rightAnkle = kp(keypoints, 'right_ankle');
+        if (!(leftAnkle && rightAnkle)) { debugEl.textContent = 'show both feet'; return; }
+
+        const diff = leftAnkle.y - rightAnkle.y;       // negative = left higher, positive = right higher
+        const liftHeight = Math.abs(diff);
+        const whichLeg = diff < 0 ? 'LEFT' : 'RIGHT';
+
+        const raised = liftHeight > 60;
+
+        formIsGood = true;
+        debugEl.textContent = 'LIFT:' + Math.round(liftHeight) + ' (' + whichLeg + ') ' + stage + ' reps:' + count;
+
+        if (raised && stage === 'up') {
+          stage = 'down';
+          statusEl.textContent = 'Lower your leg';
+          statusEl.style.color = '#5DCAA5';
+        }
+        // count when BOTH feet are back level (lift drops well below threshold)
+        if (liftHeight < 30 && stage === 'down') {   // must return near level (under 30) to reset
+          stage = 'up';
+          count++;
+          send({ type: 'counter', current_count: count });
+          statusEl.textContent = 'REP ' + count + '!';
+          statusEl.style.color = '#5DCAA5';
+        }
+      },
+  
+      // STANDING KNEE RAISES (45° side view — tracks the visible working leg)
+      kneeraise: function (keypoints) {
+        const leftHip = kp(keypoints, 'left_hip');
+        const rightHip = kp(keypoints, 'right_hip');
+        const leftKnee = kp(keypoints, 'left_knee');
+        const rightKnee = kp(keypoints, 'right_knee');
+        if (!(leftHip && rightHip)) { debugEl.textContent = 'show your full body'; return; }
+
+        const hipY = (leftHip.y + rightHip.y) / 2;
+
+        // pick whichever knee is detected with higher confidence (the one facing the camera at 45°)
+        let workingKnee = null;
+        if (leftKnee && rightKnee) {
+          workingKnee = leftKnee.score >= rightKnee.score ? leftKnee : rightKnee;
+        } else {
+          workingKnee = leftKnee || rightKnee;
+        }
+        if (!workingKnee) { debugEl.textContent = 'leg not visible'; return; }
+
+        const kneeToHip = workingKnee.y - hipY;   // small = knee raised high
+
+        const raised = kneeToHip < 50;
+        const down = kneeToHip > 90;
+
+        formIsGood = true;
+        debugEl.textContent = 'KNEE-HIP:' + Math.round(kneeToHip) + ' conf:' + Math.round(workingKnee.score*100) + '% ' + stage + ' reps:' + count;
+
+        if (raised && stage === 'up') {
+          stage = 'down';
+          statusEl.textContent = 'Lower';
+          statusEl.style.color = '#5DCAA5';
+        }
+        if (down && stage === 'down') {
+          stage = 'up';
+          count++;
+          send({ type: 'counter', current_count: count });
+          statusEl.textContent = 'REP ' + count + '!';
+          statusEl.style.color = '#5DCAA5';
+        }
+      },
+
+      // TRICEP EXTENSION (arms overhead, extend up — elbow straightens)
+      tricepextension: function (keypoints) {
+        const shoulder = kp(keypoints, 'left_shoulder');
+        const elbow = kp(keypoints, 'left_elbow');
+        const wrist = kp(keypoints, 'left_wrist');
+        if (!(shoulder && elbow && wrist)) { debugEl.textContent = 'show your arm overhead'; return; }
+
+        // elbow angle: bent (hands behind head) = small ~50°, extended (arms straight up) = large ~165°
+        const elbowAngle = smooth(angle(shoulder, elbow, wrist));
+        lastAngle = elbowAngle;
+        formIsGood = true;
+
+        debugEl.textContent = 'ELBOW:' + Math.round(elbowAngle) + ' ' + stage + ' reps:' + count;
+
+        // bent (behind head) then extended (straight up) = 1 rep
+        // "up" stage = arms bent; extend to straight then back = rep
+        if (elbowAngle > 150 && stage === 'up') {
+          stage = 'down';   // "down" = arms extended straight up
+        }
+        if (elbowAngle < 90 && stage === 'down') {
+          stage = 'up';
+          count++;
+          send({ type: 'counter', current_count: count });
+          statusEl.textContent = 'REP ' + count + '!';
+          statusEl.style.color = '#5DCAA5';
+        }
+      },
+
+
+       // SUMO SQUAT (wide-stance squat — same reliable knee-angle logic)
+      sumosquat: function (keypoints) {
+        const hip = kp(keypoints, 'left_hip');
+        const knee = kp(keypoints, 'left_knee');
+        const ankle = kp(keypoints, 'left_ankle');
+        const shoulder = kp(keypoints, 'left_shoulder');
+        if (!(hip && knee && ankle)) { debugEl.textContent = 'show your legs'; return; }
+
+        const kneeAngle = smooth(angle(hip, knee, ankle));
+        lastAngle = kneeAngle;
+        const backAngle = shoulder ? angle(shoulder, hip, knee) : 180;
+
+        formIsGood = (stage === 'down') ? (backAngle > 45) : true;
+
+        debugEl.textContent = 'KNEE:' + Math.round(kneeAngle) + ' BACK:' + Math.round(backAngle) + ' ' + stage + ' reps:' + count;
+        countRep(kneeAngle, 130, 150);
+      },
+
+      // STANDING SIDE BEND (lean torso to the side — oblique)
+      sidebend: function (keypoints) {
+        const leftShoulder = kp(keypoints, 'left_shoulder');
+        const rightShoulder = kp(keypoints, 'right_shoulder');
+        const leftHip = kp(keypoints, 'left_hip');
+        const rightHip = kp(keypoints, 'right_hip');
+        if (!(leftShoulder && rightShoulder && leftHip && rightHip)) { debugEl.textContent = 'show your upper body'; return; }
+
+        // measure torso tilt: compare shoulder line angle vs horizontal
+        // when you lean sideways, one shoulder drops lower than the other
+        const shoulderTilt = Math.abs(leftShoulder.y - rightShoulder.y);
+        const hipWidth = Math.abs(leftHip.x - rightHip.x);
+
+        // normalize tilt by body size so it works at any distance
+        const tiltRatio = hipWidth > 0 ? shoulderTilt / hipWidth : 0;
+        const smoothedTilt = smooth(tiltRatio * 100);   // scale up for readable numbers
+
+        formIsGood = true;
+        debugEl.textContent = 'TILT:' + Math.round(smoothedTilt) + ' need>40 ' + stage + ' reps:' + count;
+
+        const bent = smoothedTilt > 40;     // leaning clearly to one side
+        const upright = smoothedTilt < 20;  // back to upright
+
+        if (bent && stage === 'up') {
+          stage = 'down';   // "down" = leaning to a side
+          statusEl.textContent = 'Back to center';
+          statusEl.style.color = '#5DCAA5';
+        }
+        if (upright && stage === 'down') {
+          stage = 'up';
+          count++;
+          send({ type: 'counter', current_count: count });
+          statusEl.textContent = 'REP ' + count + '!';
+          statusEl.style.color = '#5DCAA5';
+        }
+      },
 
       
 

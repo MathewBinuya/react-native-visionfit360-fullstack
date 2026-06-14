@@ -1,9 +1,3 @@
-// AR exercises shown on the selection screen.
-// This is just the MENU DATA (which buttons appear).
-// The actual detection logic lives in assets/posedetect.html (the EXERCISES registry).
-//
-// `key` MUST match the exercise name in posedetect.html.
-
 export const AR_EXERCISES = [
   {
     key: "squat",
@@ -12,8 +6,13 @@ export const AR_EXERCISES = [
     icon: "body-outline",
     targetReps: 10,
     working: true,
+    tips: [
+      "Stand at a 45° angle to your camera",
+      "Step back so your full body (head to feet) is visible",
+      "Keep your back straight as you lower down",
+      "Bend until your thighs are about parallel to the floor",
+    ],
   },
-    // bicepcurls
   {
     key: "bicepcurl",
     label: "Bicep Curls",
@@ -21,8 +20,12 @@ export const AR_EXERCISES = [
     icon: "barbell-outline",
     targetReps: 12,
     working: true,
+    tips: [
+      "Face the camera with your arm clearly visible",
+      "Keep your upper arm still — only your forearm moves",
+      "Curl all the way up, then fully extend down",
+    ],
   },
-      // lateralraise
   {
     key: "lateralraise",
     label: "Lateral Raises",
@@ -30,19 +33,25 @@ export const AR_EXERCISES = [
     icon: "body-outline",
     targetReps: 12,
     working: true,
+    tips: [
+      "Face the camera, arms at your sides",
+      "Raise both arms out to the sides to shoulder height",
+      "Lower slowly with control",
+    ],
   },
-
-      // shoulderpress
-  { 
+  {
     key: "shoulderpress",
     label: "Shoulder Press",
     group: "Shoulders",
     icon: "barbell-outline",
     targetReps: 12,
     working: true,
+    tips: [
+      "Face the camera, hands starting at shoulder height",
+      "Press straight up overhead until arms are extended",
+      "Lower back to your shoulders",
+    ],
   },
-
-     // jumpingjack
   {
     key: "jumpingjack",
     label: "Jumping Jacks",
@@ -50,8 +59,12 @@ export const AR_EXERCISES = [
     icon: "body-outline",
     targetReps: 20,
     working: true,
+    tips: [
+      "Step back so your whole body is visible",
+      "Jump arms overhead AND feet apart together",
+      "Return arms down and feet together to complete a rep",
+    ],
   },
-    // highknees
   {
     key: "highknees",
     label: "High Knees",
@@ -59,8 +72,12 @@ export const AR_EXERCISES = [
     icon: "body-outline",
     targetReps: 20,
     working: true,
+    tips: [
+      "Step back so your hips and knees are visible",
+      "Drive each knee up toward hip height",
+      "Keep a steady, controlled pace",
+    ],
   },
-
   {
     key: "frontraise",
     label: "Front Raises",
@@ -68,10 +85,88 @@ export const AR_EXERCISES = [
     icon: "barbell-outline",
     targetReps: 12,
     working: true,
+    tips: [
+      "Face the camera with a straight arm",
+      "Raise your arm straight forward to shoulder height",
+      "Keep your elbow straight the whole time",
+    ],
   },
-
-
-
-
-
+  {
+    key: "sidelegraise",
+    label: "Side Leg Raises",
+    group: "Legs",
+    icon: "body-outline",
+    targetReps: 12,
+    working: true,
+    tips: [
+      "Face the camera, full body visible",
+      "Lift one leg out to the side, clearly off the ground",
+      "Lower it fully before raising again",
+    ],
+  },
+  {
+    key: "kneeraise",
+    label: "Knee Raises",
+    group: "Core",
+    icon: "body-outline",
+    targetReps: 12,
+    working: true,
+    tips: [
+      "Stand at a 45° angle to the camera",
+      "Lift the knee facing the camera up toward your chest",
+      "Turn to the other side to switch legs",
+    ],
+  },
+  {
+    key: "tricepextension",
+    label: "Tricep Extension",
+    group: "Arms",
+    icon: "barbell-outline",
+    targetReps: 12,
+    working: true,
+    tips: [
+      "Face the camera, hands behind your head",
+      "Extend your arms straight up overhead",
+      "Lower back down behind your head",
+    ],
+  },
+  {
+    key: "sumosquat",
+    label: "Sumo Squats",
+    group: "Legs",
+    icon: "body-outline",
+    targetReps: 12,
+    working: true,
+    tips: [
+      "Stand at a 45° angle, feet wider than shoulders",
+      "Step back so your full body is visible",
+      "Lower down keeping your back straight",
+    ],
+  },
+  {
+    key: "sidebend",
+    label: "Side Bends",
+    group: "Core",
+    icon: "body-outline",
+    targetReps: 12,
+    working: true,
+    tips: [
+      "Face the camera, upper body visible",
+      "Lean your torso to one side, then back to center",
+      "Keep the movement slow and controlled",
+    ],
+  },
+  {
+    key: "pushup",
+    label: "Push-ups",
+    group: "Chest",
+    icon: "fitness-outline",
+    targetReps: 10,
+    working: false,
+    tips: [
+      "Position at a 45° angle so your arm is visible",
+      "Lower until your elbows bend to about 90°",
+      "Push back up to full arm extension",
+    ],
+  },
 ];

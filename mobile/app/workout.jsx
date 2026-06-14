@@ -170,7 +170,7 @@ export default function Workout() {
               <TextInput
                 style={styles.titleInput}
                 placeholder="Workout title (e.g. Push Day)"
-                placeholderTextColor={COLORS.placeholderText}
+                placeholderTextColor={COLORS.black}
                 value={title}
                 onChangeText={setTitle}
               />
@@ -181,13 +181,13 @@ export default function Workout() {
                     <TextInput
                       style={styles.exerciseNameInput}
                       placeholder="Exercise name"
-                      placeholderTextColor={COLORS.placeholderText}
+                      placeholderTextColor={COLORS.black}
                       value={ex.name}
                       onChangeText={(t) => updateExerciseName(exIndex, t)}
                     />
                     {exercises.length > 1 && (
                       <TouchableOpacity onPress={() => removeExercise(exIndex)}>
-                        <Ionicons name="trash-outline" size={18} color={COLORS.placeholderText} />
+                        <Ionicons name="trash-outline" size={18} color={COLORS.black} />
                       </TouchableOpacity>
                     )}
                   </View>
@@ -198,7 +198,7 @@ export default function Workout() {
                       <TextInput
                         style={styles.setInput}
                         placeholder="reps"
-                        placeholderTextColor={COLORS.placeholderText}
+                        placeholderTextColor={COLORS.black}
                         value={set.reps}
                         onChangeText={(t) => updateSet(exIndex, setIndex, "reps", t)}
                         keyboardType="numeric"
@@ -207,14 +207,14 @@ export default function Workout() {
                       <TextInput
                         style={styles.setInput}
                         placeholder="kg"
-                        placeholderTextColor={COLORS.placeholderText}
+                        placeholderTextColor={COLORS.black}
                         value={set.weightKg}
                         onChangeText={(t) => updateSet(exIndex, setIndex, "weightKg", t)}
                         keyboardType="numeric"
                       />
                       {ex.sets.length > 1 && (
                         <TouchableOpacity onPress={() => removeSet(exIndex, setIndex)}>
-                          <Ionicons name="close" size={18} color={COLORS.placeholderText} />
+                          <Ionicons name="close" size={18} color={COLORS.black} />
                         </TouchableOpacity>
                       )}
                     </View>

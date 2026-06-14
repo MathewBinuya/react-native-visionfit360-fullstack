@@ -24,6 +24,7 @@ export default function RootLayout() {
           <Stack.Screen name="notifications" />
           <Stack.Screen name="ar-select" />
           <Stack.Screen name="posetracker" />
+          <Stack.Screen name="repvision-guide" />
 
           
         </Stack>

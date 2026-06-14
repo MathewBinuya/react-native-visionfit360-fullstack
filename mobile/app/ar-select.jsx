@@ -25,7 +25,7 @@ export default function ArSelect() {
             key={ex.key}
             style={[styles.card, ex.working === false && { opacity: 0.5 }]}
             disabled={ex.working === false}
-            onPress={() => router.push(`/posetracker?exercise=${ex.key}`)}
+            onPress={() => router.push(`/repvision-guide?exercise=${ex.key}`)}
           >
             <Ionicons name={ex.icon} size={30} color={COLORS.button} />
             <Text style={styles.cardLabel}>{ex.label}</Text>
