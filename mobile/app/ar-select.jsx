@@ -13,7 +13,7 @@ export default function ArSelect() {
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color={COLORS.black} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>AR Tracker</Text>
+        <Text style={styles.headerTitle}>Vision Reps</Text>
         <View style={{ width: 24 }} />
       </View>
 

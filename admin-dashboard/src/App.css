@@ -1,0 +1,103 @@
+:root {
+  --background: #FFFFFF;
+  --cards: #FFFFFF;
+  --gray: #AAAAAA;
+  --input-bg: #F7F7F7;
+  --border: #EBEBEB;
+  --button: #111111;
+  --placeholder: #BBBBC0;
+  --black: #000000;
+  --white: #FFFFFF;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+body { background: var(--background); color: var(--black); }
+
+/* ---------- LOGIN ---------- */
+.login-wrap {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  background: var(--input-bg);
+}
+.login-card {
+  background: var(--cards); padding: 40px; border-radius: 16px; width: 360px;
+  border: 1px solid var(--border); box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+  display: flex; flex-direction: column;
+}
+.login-card h1 { font-size: 26px; text-align: center; color: var(--black); font-weight: 700; }
+.login-card .subtitle { text-align: center; color: var(--gray); margin-bottom: 28px; font-size: 14px; }
+.login-card label { font-size: 13px; color: var(--gray); margin-bottom: 6px; margin-top: 14px; }
+.login-card input {
+  background: var(--input-bg); border: 1px solid var(--border); border-radius: 10px;
+  padding: 13px; color: var(--black); font-size: 14px;
+}
+.login-card input:focus { outline: none; border-color: var(--button); }
+.login-card input::placeholder { color: var(--placeholder); }
+.login-card button {
+  margin-top: 24px; background: var(--button); color: var(--white); border: none;
+  padding: 14px; border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer;
+  transition: opacity 0.15s;
+}
+.login-card button:hover { opacity: 0.85; }
+.login-card button:disabled { opacity: 0.5; cursor: not-allowed; }
+.error {
+  background: #FDECEC; color: #D14343; padding: 11px; border-radius: 10px;
+  font-size: 13px; text-align: center; margin-bottom: 8px;
+}
+
+/* ---------- LAYOUT (for dashboard pages — used next) ---------- */
+.layout { display: flex; min-height: 100vh; }
+.sidebar {
+  width: 240px; background: var(--cards); border-right: 1px solid var(--border);
+  padding: 24px 16px; display: flex; flex-direction: column;
+}
+.sidebar .brand { font-size: 20px; font-weight: 700; padding: 0 12px 28px; }
+.sidebar a {
+  display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: 10px;
+  color: var(--gray); text-decoration: none; font-size: 14px; font-weight: 500; margin-bottom: 4px;
+}
+.sidebar a.active, .sidebar a:hover { background: var(--input-bg); color: var(--black); }
+.sidebar .logout {
+  margin-top: auto; background: none; border: 1px solid var(--border); color: var(--black);
+  padding: 12px; border-radius: 10px; cursor: pointer; font-size: 14px;
+}
+.main { flex: 1; padding: 32px; background: var(--input-bg); }
+.page-title { font-size: 24px; font-weight: 700; margin-bottom: 24px; }
+
+/* cards / stats */
+.stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }
+.stat-card {
+  background: var(--cards); border: 1px solid var(--border); border-radius: 14px; padding: 20px;
+}
+.stat-card .label { font-size: 13px; color: var(--gray); margin-bottom: 8px; }
+.stat-card .value { font-size: 30px; font-weight: 700; color: var(--black); }
+
+/* tables */
+.card {
+  background: var(--cards); border: 1px solid var(--border); border-radius: 14px;
+  padding: 20px; margin-bottom: 20px;
+}
+.card h2 { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 12px; font-size: 14px; border-bottom: 1px solid var(--border); }
+th { color: var(--gray); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+.btn-danger {
+  background: #FDECEC; color: #D14343; border: none; padding: 7px 14px;
+  border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500;
+}
+.btn-danger:hover { background: #FBD9D9; }
+.btn-small {
+  background: var(--button); color: var(--white); border: none; padding: 7px 14px;
+  border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500;
+}
+
+.badge-active {
+  background: #E6F4EC; color: #1d9e75; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;
+}
+.badge-inactive {
+  background: #FDECEC; color: #D14343; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;
+}
+.info-row {
+  display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 14px;
+}
+.info-row span:first-child { color: var(--gray); }
+.info-row span:last-child { font-weight: 500; }

@@ -7,21 +7,25 @@ import profileRoutes from "./routes/profileRoutes.js";
 import bmiRoutes from "./routes/bmiRoutes.js";
 import workoutRoutes from "./routes/workoutRoutes.js";
 import aiRoutes from './routes/aiRoutes.js'
+import adminRoutes from "./routes/adminRoutes.js";
+import cors from "cors";
 
 import { connectDB } from "./lib/db.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// job.start();   
+// job.start();
 
-app.use(express.json());
+app.use(cors());              // ← MOVED UP: must come before routes
+app.use(express.json());      // keep this once, before routes
 
 app.use("/api/ai", aiRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/bmi", bmiRoutes);
-app.use("/api/workouts", workoutRoutes);   
+app.use("/api/workouts", workoutRoutes);
+app.use("/api/admin", adminRoutes);
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
