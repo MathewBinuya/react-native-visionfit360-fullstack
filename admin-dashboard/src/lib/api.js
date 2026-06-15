@@ -2,7 +2,7 @@ import axios from "axios";
 
 // your backend URL — same backend the mobile app uses
 const api = axios.create({
-  baseURL: "http://localhost:3000/api/admin",
+  baseURL: "https://visionfit-backend-cwxi.onrender.com/api/admin",
 });
 
 // attach the admin token to every request
