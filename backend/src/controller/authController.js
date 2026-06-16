@@ -9,8 +9,31 @@ export const register = async (req, res) => {
       return res.status(400).json({message: "All fields are required"});
     }
 
-    if(password.length < 6) {
-      return res.status(400).json({message: "Password should be at least 3 characters long"});
+    // length caps (prevent oversized input / DoS abuse)
+    if(username.length > 30) {
+      return res.status(400).json({message: "Username must be 30 characters or less"});
+    }
+    if(email.length > 100) {
+      return res.status(400).json({message: "Email is too long"});
+    }
+    if(password.length > 64) {
+      return res.status(400).json({message: "Password must be 64 characters or less"});
+    }
+
+    // password strength: 8+ chars, at least one letter and one number
+    if(password.length < 8) {
+      return res.status(400).json({message: "Password must be at least 8 characters long"});
+    }
+    if(!/[a-zA-Z]/.test(password)) {
+      return res.status(400).json({message: "Password must include at least one letter"});
+    }
+    if(!/[0-9]/.test(password)) {
+      return res.status(400).json({message: "Password must include at least one number"});
+    }
+
+    // basic email format check
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({message: "Please enter a valid email address"});
     }
 
     const existingEmail = await User.findOne({ email });
@@ -34,7 +57,7 @@ export const register = async (req, res) => {
         id: user._id,
         username: user.username,
         email: user.email,
-        onBoardingComplete: user.onBoardingComplete, 
+        onBoardingComplete: user.onBoardingComplete,
         createdAt: user.createdAt
       },
     });

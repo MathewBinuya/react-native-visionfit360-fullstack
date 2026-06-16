@@ -55,7 +55,7 @@ export default function Index() {
       />
       <Text style={styles.appName}>VisionFIT360</Text>
       <Text style={styles.tagline}>Your personal fitness coach</Text>
-      <ActivityIndicator size="small" color={COLORS.white} style={{ marginTop: 24 }} />
+      <ActivityIndicator size="small" color={COLORS.black} style={{ marginTop: 24 }} />
     </View>
   );
 }
@@ -65,11 +65,11 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: COLORS.button,   // brand logo
+    backgroundColor: COLORS.white,   // brand logo
   },
   logo: { width: 120, height: 120, marginBottom: 16 },
-  appName: { fontSize: 28, fontWeight: "600", color: COLORS.white, fontFamily: "GeneralSans-Variable" },
-  tagline: { fontSize: 14, color: COLORS.white, opacity: 0.85, marginTop: 4, fontFamily: "GeneralSans-Variable" },
+  appName: { fontSize: 28, fontWeight: "600", color: COLORS.black, fontFamily: "GeneralSans-Variable" },
+  tagline: { fontSize: 14, color: COLORS.black, opacity: 0.85, marginTop: 4, fontFamily: "GeneralSans-Variable" },
 });
 
 const _ = useAuthStore; // (ignore — keeps import used if you trim later)
