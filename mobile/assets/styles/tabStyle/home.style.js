@@ -69,7 +69,7 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: COLORS.border,
   },
   placeholderLabel: { fontSize: 13, color: COLORS.black, marginTop: 8, fontFamily: "GeneralSans-Variable" },
-  placeholderSub: { fontSize: 11, color: COLORS.black, marginTop: 2, fontFamily: "GeneralSans-Variable" },
+  placeholderSub: { fontSize: 11, color: COLORS.placeholderText, marginTop: 2, fontFamily: "GeneralSans-Variable" },
   historyButton: {
     flex: 1, backgroundColor: COLORS.cards,
     borderRadius: 12, padding: 16, alignItems: "center",

@@ -5,7 +5,7 @@ const COLORS = {
   inputBackground: "#F7F7F7",
   border: "#EBEBEB",
   button: "#111111",
-  placeholderText: "##BBBBC0",
+  placeholderText: "#BBBBC0",
   white: "#FFFFFF",
   black: "#000000"
 }

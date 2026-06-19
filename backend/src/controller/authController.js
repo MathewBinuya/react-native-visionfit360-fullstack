@@ -16,7 +16,7 @@ export const register = async (req, res) => {
     if(email.length > 100) {
       return res.status(400).json({message: "Email is too long"});
     }
-    if(password.length > 64) {
+    if(password.length > 14) {
       return res.status(400).json({message: "Password must be 64 characters or less"});
     }
 

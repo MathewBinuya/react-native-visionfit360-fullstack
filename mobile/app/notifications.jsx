@@ -1,8 +1,7 @@
-import { View, Text, TouchableOpacity, Switch, Platform, Alert } from 'react-native'
+import { View, Text, TouchableOpacity, Switch, Alert } from 'react-native'
 import { useState, useEffect } from 'react'
 import { router } from 'expo-router'
 import { Ionicons } from "@expo/vector-icons"
-import DateTimePicker from "@react-native-community/datetimepicker"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import COLORS from "../constants/colors"
 import styles from '../assets/styles/notifications.style'
@@ -15,36 +14,28 @@ import {
 
 export default function NotificationsScreen() {
   const [enabled, setEnabled] = useState(false);
-  const [morning, setMorning] = useState(new Date(2024, 0, 1, 8, 0));   // 8:00 AM
-  const [evening, setEvening] = useState(new Date(2024, 0, 1, 20, 0));  // 8:00 PM
-  const [showMorningPicker, setShowMorningPicker] = useState(false);
-  const [showEveningPicker, setShowEveningPicker] = useState(false);
 
-  // load saved settings
+  // fixed default reminder times (8 AM and 8 PM) — set by the app, not the user
+  const MORNING = { hour: 8, minute: 0 };
+  const EVENING = { hour: 20, minute: 0 };
+
+  // load saved setting
   useEffect(() => {
     (async () => {
       const saved = await AsyncStorage.getItem("notifSettings");
       if (saved) {
         const s = JSON.parse(saved);
         setEnabled(s.enabled);
-        setMorning(new Date(2024, 0, 1, s.morningHour, s.morningMinute));
-        setEvening(new Date(2024, 0, 1, s.eveningHour, s.eveningMinute));
       }
     })();
   }, []);
 
-  const persist = async (isEnabled, m, e) => {
+  const persist = async (isEnabled) => {
     await AsyncStorage.setItem("notifSettings", JSON.stringify({
       enabled: isEnabled,
-      morningHour: m.getHours(),
-      morningMinute: m.getMinutes(),
-      eveningHour: e.getHours(),
-      eveningMinute: e.getMinutes(),
+      morningHour: MORNING.hour, morningMinute: MORNING.minute,
+      eveningHour: EVENING.hour, eveningMinute: EVENING.minute,
     }));
-  };
-
-  const applySchedule = async (m, e) => {
-    await scheduleDailyNotifications(m.getHours(), m.getMinutes(), e.getHours(), e.getMinutes());
   };
 
   const toggleEnabled = async (value) => {
@@ -55,35 +46,14 @@ export default function NotificationsScreen() {
         return;
       }
       setEnabled(true);
-      await applySchedule(morning, evening);
-      await persist(true, morning, evening);
+      await scheduleDailyNotifications(MORNING.hour, MORNING.minute, EVENING.hour, EVENING.minute);
+      await persist(true);
     } else {
       setEnabled(false);
       await cancelAllNotifications();
-      await persist(false, morning, evening);
+      await persist(false);
     }
   };
-
-  const onMorningChange = async (event, selected) => {
-    setShowMorningPicker(Platform.OS === "ios");
-    if (selected) {
-      setMorning(selected);
-      if (enabled) await applySchedule(selected, evening);
-      await persist(enabled, selected, evening);
-    }
-  };
-
-  const onEveningChange = async (event, selected) => {
-    setShowEveningPicker(Platform.OS === "ios");
-    if (selected) {
-      setEvening(selected);
-      if (enabled) await applySchedule(morning, selected);
-      await persist(enabled, morning, selected);
-    }
-  };
-
-  const fmt = (d) =>
-    d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   return (
     <View style={styles.container}>
@@ -110,44 +80,11 @@ export default function NotificationsScreen() {
           />
         </View>
 
-        {/* morning time */}
-        <TouchableOpacity
-          style={[styles.timeRow, !enabled && { opacity: 0.4 }]}
-          disabled={!enabled}
-          onPress={() => setShowMorningPicker(true)}
-        >
-          <View style={styles.timeLeft}>
-            <Ionicons name="sunny-outline" size={20} color={COLORS.button} />
-            <Text style={styles.timeLabel}>Morning reminder</Text>
-          </View>
-          <Text style={styles.timeValue}>{fmt(morning)}</Text>
-        </TouchableOpacity>
-
-        {/* evening time */}
-        <TouchableOpacity
-          style={[styles.timeRow, !enabled && { opacity: 0.4 }]}
-          disabled={!enabled}
-          onPress={() => setShowEveningPicker(true)}
-        >
-          <View style={styles.timeLeft}>
-            <Ionicons name="moon-outline" size={20} color={COLORS.button} />
-            <Text style={styles.timeLabel}>Evening motivation</Text>
-          </View>
-          <Text style={styles.timeValue}>{fmt(evening)}</Text>
-        </TouchableOpacity>
-
         {/* test button */}
         <TouchableOpacity style={styles.testBtn} onPress={sendTestNotification}>
           <Ionicons name="notifications-outline" size={18} color={COLORS.button} />
           <Text style={styles.testText}>Send test notification</Text>
         </TouchableOpacity>
-
-        {(showMorningPicker) && (
-          <DateTimePicker value={morning} mode="time" is24Hour={false} onChange={onMorningChange} />
-        )}
-        {(showEveningPicker) && (
-          <DateTimePicker value={evening} mode="time" is24Hour={false} onChange={onEveningChange} />
-        )}
       </View>
     </View>
   );

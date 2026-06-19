@@ -89,7 +89,7 @@
     let smoothHistory = [];
     function smooth(val) {
       smoothHistory.push(val);
-      if (smoothHistory.length > 5) smoothHistory.shift();
+      if (smoothHistory.length > 4) smoothHistory.shift();   // 4-frame window (was 5) — a touch more responsive
       return smoothHistory.reduce((a, b) => a + b, 0) / smoothHistory.length;
     }
 
@@ -99,8 +99,8 @@
       if (!k) return k;
       if (!kpHistory[k.name]) kpHistory[k.name] = { x: k.x, y: k.y };
       const prev = kpHistory[k.name];
-      const sx = prev.x * 0.6 + k.x * 0.4;   // 60% old, 40% new = smooth glide
-      const sy = prev.y * 0.6 + k.y * 0.4;
+      const sx = prev.x * 0.5 + k.x * 0.5;   // 50/50 — less lag than 0.6/0.4, still smooth
+      const sy = prev.y * 0.5 + k.y * 0.5;
       kpHistory[k.name] = { x: sx, y: sy };
       return { ...k, x: sx, y: sy };
     }
@@ -157,10 +157,8 @@
         const elbowAngle = smooth(angle(shoulder, elbow, wrist));
         lastAngle = elbowAngle;
 
-        // upper arm should stay roughly vertical: angle at shoulder (hip-shoulder-elbow) small = elbow tucked
         let upperArmAngle = 0;
         if (hip) upperArmAngle = angle(hip, shoulder, elbow);
-        // if the elbow drifts forward/up (upper arm swings out past ~40°), flag it
         if (hip && upperArmAngle > 40) { formIsGood = false; formMsg = 'Keep your elbow still'; }
         else { formIsGood = true; formMsg = ''; }
 
@@ -179,7 +177,6 @@
         const armAngle = smooth(angle(hip, shoulder, wrist));
         lastAngle = armAngle;
 
-        // bad: raised too high (past ~100°, above shoulder line) OR elbow very bent
         const elbowAngle = elbow ? angle(shoulder, elbow, wrist) : 180;
         if (armAngle > 100) { formIsGood = false; formMsg = 'Don\'t raise above shoulder'; }
         else if (elbow && elbowAngle < 140) { formIsGood = false; formMsg = 'Keep your arm straighter'; }
@@ -210,7 +207,6 @@
         const elbowAngle = smooth(angle(shoulder, elbow, wrist));
         lastAngle = elbowAngle;
 
-        // when pressing up (stage down = pressed), arms should reach near-straight (>150). Flag a stuck mid-range.
         if (stage === 'down' && elbowAngle < 150) { formIsGood = false; formMsg = 'Press all the way up'; }
         else { formIsGood = true; formMsg = ''; }
 
@@ -249,7 +245,6 @@
         const legsApart = ankleSpread > hipSpread * 1.5;
         const jackOpen = handsUp && legsApart;
 
-        // bad form: in the open phase (stage down) but only one half is done (lazy rep)
         if (stage === 'down' && !(handsUp && legsApart)) { formIsGood = false; formMsg = 'Full jack: arms up + legs out'; }
         else { formIsGood = true; formMsg = ''; }
 
@@ -284,7 +279,6 @@
         const rightKneeUp = rightKnee.y < hipY + 60;
         const aKneeIsUp = leftKneeUp || rightKneeUp;
 
-        // "barely up" zone: a knee rose a little but not to proper height = bad form
         const leftBarely = (leftKnee.y < hipY + 130) && !leftKneeUp;
         const rightBarely = (rightKnee.y < hipY + 130) && !rightKneeUp;
         if ((leftBarely || rightBarely) && !aKneeIsUp) { formIsGood = false; formMsg = 'Lift your knees higher'; }
@@ -318,7 +312,6 @@
         const elbowAngle = angle(shoulder, elbow, wrist);
         const armStraight = elbowAngle > 150;
 
-        // only judge form while the arm is actually raised (avoid red while resting at the side)
         if (armAngle > 40 && !armStraight) { formIsGood = false; formMsg = 'Keep your arm straight'; }
         else { formIsGood = true; formMsg = ''; }
 
@@ -380,7 +373,6 @@
         const whichLeg = diff < 0 ? 'LEFT' : 'RIGHT';
         const raised = liftHeight > 60;
 
-        // shallow lift (started lifting but not enough) = bad form
         if (liftHeight > 30 && liftHeight <= 60 && stage === 'up') { formIsGood = false; formMsg = 'Lift your leg higher'; }
         else { formIsGood = true; formMsg = ''; }
 
@@ -421,7 +413,6 @@
         const raised = kneeToHip < 50;
         const down = kneeToHip > 90;
 
-        // mid-zone: knee lifted partway but not high enough = bad form
         if (kneeToHip >= 50 && kneeToHip <= 75 && stage === 'up') { formIsGood = false; formMsg = 'Raise your knee higher'; }
         else { formIsGood = true; formMsg = ''; }
 
@@ -450,7 +441,6 @@
         const elbowAngle = smooth(angle(shoulder, elbow, wrist));
         lastAngle = elbowAngle;
 
-        // when extending (stage down = extended), arms should reach near-straight (>150)
         if (stage === 'down' && elbowAngle < 150) { formIsGood = false; formMsg = 'Extend your arms fully'; }
         else { formIsGood = true; formMsg = ''; }
 
@@ -504,7 +494,6 @@
         const bent = smoothedTilt > 40;
         const upright = smoothedTilt < 20;
 
-        // partial bend zone = bad form (encourage a fuller bend)
         if (smoothedTilt >= 20 && smoothedTilt <= 40 && stage === 'up') { formIsGood = false; formMsg = 'Bend further to the side'; }
         else { formIsGood = true; formMsg = ''; }
 
@@ -525,75 +514,89 @@
 
     };
 
-    async function runDetection() {
-      if (detector && video.readyState === 4) {
-        const poses = await detector.estimatePoses(video);
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        if (poses.length > 0) {
-          const keypoints = poses[0].keypoints;
+    // Runs ONE detection + draw pass (no scheduling here)
+    async function detectOnce() {
+      const poses = await detector.estimatePoses(video);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (poses.length > 0) {
+        const keypoints = poses[0].keypoints;
 
-          // run exercise logic on RAW keypoints (counting stays accurate)
-          const detect = EXERCISES[exercise];
-          if (detect) detect(keypoints);
-          else debugEl.textContent = 'Unknown exercise: ' + exercise;
+        // run exercise logic on RAW keypoints (counting stays accurate)
+        const detect = EXERCISES[exercise];
+        if (detect) detect(keypoints);
+        else debugEl.textContent = 'Unknown exercise: ' + exercise;
 
-          // strict counting: if form is bad at any point during a rep, mark it
-          if (!formIsGood) formBadThisRep = true;
+        // strict counting: if form is bad at any point during a rep, mark it
+        if (!formIsGood) formBadThisRep = true;
 
-          // smoothed copy for DRAWING only (reduces scatter, counting unaffected)
-          const drawKeypoints = keypoints.map(smoothKp);
+        // smoothed copy for DRAWING only (reduces scatter, counting unaffected)
+        const drawKeypoints = keypoints.map(smoothKp);
 
-          const color = formIsGood ? '#1D9E75' : '#E24B4A';
+        const color = formIsGood ? '#1D9E75' : '#E24B4A';
 
-          // ---- FAR-VISIBLE FORM BORDER ----
-          // good form: thin subtle green frame; bad form: thick bold red frame (the attention signal)
-          if (formIsGood) {
-            formBorder.style.borderColor = 'rgba(29,158,117,0.55)';
-            formBorder.style.borderWidth = '8px';
-          } else {
-            formBorder.style.borderColor = '#E24B4A';
-            formBorder.style.borderWidth = '22px';
-          }
-
-          // thicker, glowing, rounded skeleton lines (also a far-visible color signal)
-          ctx.strokeStyle = color;
-          ctx.lineWidth = 8;
-          ctx.lineCap = 'round';
-          ctx.lineJoin = 'round';
-          ctx.shadowColor = color;
-          ctx.shadowBlur = 6;
-
-          CONNECTIONS.forEach(([a, b]) => {
-            const p1 = kp(drawKeypoints, a), p2 = kp(drawKeypoints, b);
-            if (p1 && p2 && p1.score > MIN_SCORE && p2.score > MIN_SCORE) {
-              ctx.beginPath();
-              ctx.moveTo(p1.x, p1.y);
-              ctx.lineTo(p2.x, p2.y);
-              ctx.stroke();
-            }
-          });
-
-          // bigger joint dots with white centers
-          drawKeypoints.forEach(k => {
-            if (k.score > MIN_SCORE) {
-              ctx.fillStyle = color;
-              ctx.beginPath();
-              ctx.arc(k.x, k.y, 10, 0, 2 * Math.PI);
-              ctx.fill();
-              ctx.shadowBlur = 0;
-              ctx.fillStyle = '#FFFFFF';
-              ctx.beginPath();
-              ctx.arc(k.x, k.y, 4, 0, 2 * Math.PI);
-              ctx.fill();
-            }
-          });
-
-          ctx.shadowBlur = 0;
-
-          // send form state out to RN (so the native screen can show the message in the help area if wanted)
-          send({ type: 'form', good: formIsGood, msg: formMsg });
+        // ---- FAR-VISIBLE FORM BORDER ----
+        if (formIsGood) {
+          formBorder.style.borderColor = 'rgba(29,158,117,0.55)';
+          formBorder.style.borderWidth = '8px';
+        } else {
+          formBorder.style.borderColor = '#E24B4A';
+          formBorder.style.borderWidth = '22px';
         }
+
+        // thicker, glowing, rounded skeleton lines
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 8;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 6;
+
+        CONNECTIONS.forEach(([a, b]) => {
+          const p1 = kp(drawKeypoints, a), p2 = kp(drawKeypoints, b);
+          if (p1 && p2 && p1.score > MIN_SCORE && p2.score > MIN_SCORE) {
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.stroke();
+          }
+        });
+
+        drawKeypoints.forEach(k => {
+          if (k.score > MIN_SCORE) {
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(k.x, k.y, 10, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = '#FFFFFF';
+            ctx.beginPath();
+            ctx.arc(k.x, k.y, 4, 0, 2 * Math.PI);
+            ctx.fill();
+          }
+        });
+
+        ctx.shadowBlur = 0;
+
+        send({ type: 'form', good: formIsGood, msg: formMsg });
       }
+    }
+
+    // SELF-SCHEDULING LOOP with busy-guard:
+    // runs the next frame only AFTER the current one finishes, so detections never
+    // pile up into a laggy backlog. This is the main speed/responsiveness fix.
+    let running = false;
+    async function loop() {
+      if (detector && video.readyState === 4 && !running) {
+        running = true;
+        try {
+          await detectOnce();
+        } catch (e) {
+          debugEl.textContent = 'detect err: ' + e.message;
+        }
+        running = false;
+      }
+      // schedule next frame as soon as possible (requestAnimationFrame syncs to the screen refresh)
+      requestAnimationFrame(loop);
     }
 
     async function init() {
@@ -610,7 +613,7 @@
           { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING }
         );
         statusEl.textContent = 'Get into position';
-        setInterval(runDetection, 100);
+        requestAnimationFrame(loop);   // start the self-scheduling loop
       } catch (err) {
         debugEl.textContent = 'Error: ' + err.message;
       }
