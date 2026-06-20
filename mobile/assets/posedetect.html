@@ -12,7 +12,6 @@
     video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
     video { transform: scaleX(-1); }
     canvas { transform: scaleX(-1); }
-    /* Far-visible form border: sits on top of the camera, turns red on bad form */
     #formBorder {
       position: absolute; top: 0; left: 0; right: 0; bottom: 0;
       z-index: 9; pointer-events: none;
@@ -53,10 +52,7 @@
     const formBorder = document.getElementById('formBorder');
 
     let detector = null, count = 0, stage = 'up', formIsGood = true, lastAngle = 180;
-    // formMsg = short reason for bad form (used for the help modal / debug, not relied on at distance)
     let formMsg = '';
-    // strict counting: tracks if form went bad at any point during the current rep
-    let formBadThisRep = false;
     const MIN_SCORE = 0.3;
 
     const CONNECTIONS = [
@@ -67,12 +63,9 @@
       ['right_hip','right_knee'],['right_knee','right_ankle'],
     ];
 
-    // for push detection
-    let ready = false;
     let headMax = 0;
     let headMin = 9999;
 
-    //   shared helpers
     function angle(a, b, c) {
       const ab = { x: a.x - b.x, y: a.y - b.y };
       const cb = { x: c.x - b.x, y: c.y - b.y };
@@ -89,143 +82,98 @@
     let smoothHistory = [];
     function smooth(val) {
       smoothHistory.push(val);
-      if (smoothHistory.length > 4) smoothHistory.shift();   // 4-frame window (was 5) — a touch more responsive
+      if (smoothHistory.length > 4) smoothHistory.shift();
       return smoothHistory.reduce((a, b) => a + b, 0) / smoothHistory.length;
     }
 
-    // smooth keypoint POSITIONS to reduce scatter/jitter (drawing only)
     const kpHistory = {};
     function smoothKp(k) {
       if (!k) return k;
       if (!kpHistory[k.name]) kpHistory[k.name] = { x: k.x, y: k.y };
       const prev = kpHistory[k.name];
-      const sx = prev.x * 0.5 + k.x * 0.5;   // 50/50 — less lag than 0.6/0.4, still smooth
+      const sx = prev.x * 0.5 + k.x * 0.5;
       const sy = prev.y * 0.5 + k.y * 0.5;
       kpHistory[k.name] = { x: sx, y: sy };
       return { ...k, x: sx, y: sy };
     }
 
+    function rep() {
+      count++;
+      send({ type: 'counter', current_count: count });
+      statusEl.textContent = 'REP ' + count + '!';
+      statusEl.style.color = '#5DCAA5';
+    }
+
     function countRep(primaryAngle, downThreshold, upThreshold) {
-      if (primaryAngle < downThreshold && stage === 'up') {
-        stage = 'down';
-        formBadThisRep = false;   // new rep starting — reset form flag
-      }
-      if (stage === 'down' && !formIsGood) formBadThisRep = true;  // form went bad during the rep
-      if (primaryAngle > upThreshold && stage === 'down') {
-        stage = 'up';
-        if (!formBadThisRep) {
-          count++;
-          send({ type: 'counter', current_count: count });
-          statusEl.textContent = 'REP ' + count + '!';
-          statusEl.style.color = '#5DCAA5';
-        } else {
-          statusEl.textContent = 'Bad form — not counted';
-          statusEl.style.color = '#E24B4A';
-        }
-      }
+      if (primaryAngle < downThreshold && stage === 'up') stage = 'down';
+      if (primaryAngle > upThreshold && stage === 'down') { stage = 'up'; rep(); }
     }
 
     const EXERCISES = {
 
-      // SQUAT — bad form: back leans too far forward when down
       squat: function (keypoints) {
         const hip = kp(keypoints, 'left_hip');
         const knee = kp(keypoints, 'left_knee');
         const ankle = kp(keypoints, 'left_ankle');
         const shoulder = kp(keypoints, 'left_shoulder');
         if (!(hip && knee && ankle)) { debugEl.textContent = 'legs unclear'; return; }
-
         const kneeAngle = smooth(angle(hip, knee, ankle));
         lastAngle = kneeAngle;
         const backAngle = shoulder ? angle(shoulder, hip, knee) : 180;
-
-        if (stage === 'down' && backAngle <= 45) { formIsGood = false; formMsg = 'Keep your back upright'; }
-        else { formIsGood = true; formMsg = ''; }
-
+        formIsGood = !(stage === 'down' && backAngle <= 45);
+        formMsg = formIsGood ? '' : 'Keep your back upright';
         debugEl.textContent = 'KNEE:' + Math.round(kneeAngle) + ' BACK:' + Math.round(backAngle) + ' ' + stage + ' reps:' + count;
         countRep(kneeAngle, 130, 150);
       },
 
-      // BICEP CURL — bad form: upper arm swinging (elbow drifts away from torso)
       bicepcurl: function (keypoints) {
-        const shoulder = kp(keypoints, 'left_shoulder');
-        const elbow = kp(keypoints, 'left_elbow');
-        const wrist = kp(keypoints, 'left_wrist');
-        const hip = kp(keypoints, 'left_hip');
-        if (!(shoulder && elbow && wrist)) { debugEl.textContent = 'arm unclear — show your arm'; return; }
+      const shoulder = kp(keypoints, 'left_shoulder');
+      const elbow = kp(keypoints, 'left_elbow');
+      const wrist = kp(keypoints, 'left_wrist');
+      const hip = kp(keypoints, 'left_hip');
+      if (!(shoulder && elbow && wrist)) { debugEl.textContent = 'arm unclear — show your arm'; return; }
 
-        const elbowAngle = smooth(angle(shoulder, elbow, wrist));
-        lastAngle = elbowAngle;
+      const elbowAngle = smooth(angle(shoulder, elbow, wrist));
+      lastAngle = elbowAngle;
 
-        let upperArmAngle = 0;
-        if (hip) upperArmAngle = angle(hip, shoulder, elbow);
-        if (hip && upperArmAngle > 40) { formIsGood = false; formMsg = 'Keep your elbow still'; }
-        else { formIsGood = true; formMsg = ''; }
+      // looser form check (only flag a big swing), and never blocks counting
+      let upperArmAngle = hip ? angle(hip, shoulder, elbow) : 0;
+      formIsGood = !(hip && upperArmAngle > 60);   // was 45 — now more forgiving
+      formMsg = formIsGood ? '' : 'Keep your elbow still';
 
-        debugEl.textContent = 'ELBOW:' + Math.round(elbowAngle) + ' UPARM:' + Math.round(upperArmAngle) + ' ' + stage + ' reps:' + count;
-        countRep(elbowAngle, 60, 150);
-      },
+      debugEl.textContent = 'ELBOW:' + Math.round(elbowAngle) + ' UPARM:' + Math.round(upperArmAngle) + ' ' + stage + ' reps:' + count;
 
-      // LATERAL RAISE — bad form: arm raised too high (above shoulder) or elbow bent
+      // WIDER thresholds so partial curls still count: curl under 80, extend over 140
+      countRep(elbowAngle, 80, 140);   // was 60, 150 — easier to trigger both states
+     },
+
       lateralraise: function (keypoints) {
         const hip = kp(keypoints, 'left_hip');
         const shoulder = kp(keypoints, 'left_shoulder');
-        const elbow = kp(keypoints, 'left_elbow');
         const wrist = kp(keypoints, 'left_wrist');
         if (!(hip && shoulder && wrist)) { debugEl.textContent = 'arm unclear — show your side'; return; }
-
         const armAngle = smooth(angle(hip, shoulder, wrist));
         lastAngle = armAngle;
-
-        const elbowAngle = elbow ? angle(shoulder, elbow, wrist) : 180;
-        if (armAngle > 100) { formIsGood = false; formMsg = 'Don\'t raise above shoulder'; }
-        else if (elbow && elbowAngle < 140) { formIsGood = false; formMsg = 'Keep your arm straighter'; }
-        else { formIsGood = true; formMsg = ''; }
-
-        debugEl.textContent = 'ARM:' + Math.round(armAngle) + ' ELBOW:' + Math.round(elbowAngle) + ' ' + stage + ' reps:' + count;
-
-        if (armAngle > 75 && stage === 'up') { stage = 'down'; formBadThisRep = false; }
-        if (armAngle < 30 && stage === 'down') {
-          stage = 'up';
-          if (!formBadThisRep) {
-            count++;
-            send({ type: 'counter', current_count: count });
-            statusEl.textContent = 'REP ' + count + '!'; statusEl.style.color = '#5DCAA5';
-          } else {
-            statusEl.textContent = 'Bad form — not counted'; statusEl.style.color = '#E24B4A';
-          }
-        }
+        formIsGood = !(armAngle > 110);
+        formMsg = formIsGood ? '' : 'Dont raise above shoulder';
+        debugEl.textContent = 'ARM:' + Math.round(armAngle) + ' ' + stage + ' reps:' + count;
+        if (armAngle > 70 && stage === 'up') stage = 'down';
+        if (armAngle < 30 && stage === 'down') { stage = 'up'; rep(); }
       },
 
-      // SHOULDER PRESS — bad form: not pressing fully overhead (half rep at top)
       shoulderpress: function (keypoints) {
         const shoulder = kp(keypoints, 'left_shoulder');
         const elbow = kp(keypoints, 'left_elbow');
         const wrist = kp(keypoints, 'left_wrist');
         if (!(shoulder && elbow && wrist)) { debugEl.textContent = 'arm unclear — face camera'; return; }
-
         const elbowAngle = smooth(angle(shoulder, elbow, wrist));
         lastAngle = elbowAngle;
-
-        if (stage === 'down' && elbowAngle < 150) { formIsGood = false; formMsg = 'Press all the way up'; }
-        else { formIsGood = true; formMsg = ''; }
-
+        formIsGood = true; formMsg = '';
         debugEl.textContent = 'ELBOW:' + Math.round(elbowAngle) + ' ' + stage + ' reps:' + count;
-
-        if (elbowAngle > 150 && stage === 'up') { stage = 'down'; formBadThisRep = false; }
-        if (elbowAngle < 90 && stage === 'down') {
-          stage = 'up';
-          if (!formBadThisRep) {
-            count++;
-            send({ type: 'counter', current_count: count });
-            statusEl.textContent = 'REP ' + count + '!'; statusEl.style.color = '#5DCAA5';
-          } else {
-            statusEl.textContent = 'Bad form — not counted'; statusEl.style.color = '#E24B4A';
-          }
-        }
+        if (elbowAngle > 150 && stage === 'up') stage = 'down';
+        if (elbowAngle < 90 && stage === 'down') { stage = 'up'; rep(); }
       },
 
-      // JUMPING JACK — bad form: partial rep (hands not above head OR legs not spread on the open)
       jumpingjack: function (keypoints) {
         const leftWrist = kp(keypoints, 'left_wrist');
         const rightWrist = kp(keypoints, 'right_wrist');
@@ -235,306 +183,166 @@
         const leftHip = kp(keypoints, 'left_hip');
         const rightHip = kp(keypoints, 'right_hip');
         if (!(leftWrist && rightWrist && nose && leftAnkle && rightAnkle && leftHip && rightHip)) {
-          debugEl.textContent = 'show your WHOLE body (head to feet)';
-          return;
+          debugEl.textContent = 'show your WHOLE body (head to feet)'; return;
         }
-
         const handsUp = (leftWrist.y < nose.y) && (rightWrist.y < nose.y);
         const ankleSpread = Math.abs(leftAnkle.x - rightAnkle.x);
         const hipSpread = Math.abs(leftHip.x - rightHip.x);
         const legsApart = ankleSpread > hipSpread * 1.5;
         const jackOpen = handsUp && legsApart;
-
-        if (stage === 'down' && !(handsUp && legsApart)) { formIsGood = false; formMsg = 'Full jack: arms up + legs out'; }
-        else { formIsGood = true; formMsg = ''; }
-
+        formIsGood = true; formMsg = '';
         debugEl.textContent = 'hands:' + handsUp + ' legs:' + legsApart + ' ' + stage + ' reps:' + count;
-
-        if (jackOpen && stage === 'up') { stage = 'down'; formBadThisRep = false; }
-        if (!handsUp && !legsApart && stage === 'down') {
-          stage = 'up';
-          if (!formBadThisRep) {
-            count++;
-            send({ type: 'counter', current_count: count });
-            statusEl.textContent = 'REP ' + count + '!'; statusEl.style.color = '#5DCAA5';
-          } else {
-            statusEl.textContent = 'Bad form — not counted'; statusEl.style.color = '#E24B4A';
-          }
-        }
+        if (jackOpen && stage === 'up') stage = 'down';
+        if (!handsUp && !legsApart && stage === 'down') { stage = 'up'; rep(); }
       },
 
-      // HIGH KNEES — bad form: knees not lifting high enough
       highknees: function (keypoints) {
         const leftHip = kp(keypoints, 'left_hip');
         const rightHip = kp(keypoints, 'right_hip');
         const leftKnee = kp(keypoints, 'left_knee');
         const rightKnee = kp(keypoints, 'right_knee');
-        if (!(leftHip && rightHip && leftKnee && rightKnee)) {
-          debugEl.textContent = 'show your full body';
-          return;
-        }
-
+        if (!(leftHip && rightHip && leftKnee && rightKnee)) { debugEl.textContent = 'show your full body'; return; }
         const hipY = (leftHip.y + rightHip.y) / 2;
         const leftKneeUp = leftKnee.y < hipY + 60;
         const rightKneeUp = rightKnee.y < hipY + 60;
         const aKneeIsUp = leftKneeUp || rightKneeUp;
-
-        const leftBarely = (leftKnee.y < hipY + 130) && !leftKneeUp;
-        const rightBarely = (rightKnee.y < hipY + 130) && !rightKneeUp;
-        if ((leftBarely || rightBarely) && !aKneeIsUp) { formIsGood = false; formMsg = 'Lift your knees higher'; }
-        else { formIsGood = true; formMsg = ''; }
-
+        formIsGood = true; formMsg = '';
         debugEl.textContent = 'L:' + leftKneeUp + ' R:' + rightKneeUp + ' ' + stage + ' reps:' + count;
-
-        if (aKneeIsUp && stage === 'up') { stage = 'down'; formBadThisRep = false; }
-        if (!aKneeIsUp && stage === 'down') {
-          stage = 'up';
-          if (!formBadThisRep) {
-            count++;
-            send({ type: 'counter', current_count: count });
-            statusEl.textContent = 'REP ' + count + '!'; statusEl.style.color = '#5DCAA5';
-          } else {
-            statusEl.textContent = 'Bad form — not counted'; statusEl.style.color = '#E24B4A';
-          }
-        }
+        if (aKneeIsUp && stage === 'up') stage = 'down';
+        if (!aKneeIsUp && stage === 'down') { stage = 'up'; rep(); }
       },
 
-      // FRONT RAISE — bad form: bent arm (not straight)
       frontraise: function (keypoints) {
         const hip = kp(keypoints, 'left_hip');
         const shoulder = kp(keypoints, 'left_shoulder');
         const elbow = kp(keypoints, 'left_elbow');
         const wrist = kp(keypoints, 'left_wrist');
         if (!(hip && shoulder && elbow && wrist)) { debugEl.textContent = 'face camera — show your full arm'; return; }
-
         const armAngle = smooth(angle(hip, shoulder, wrist));
         lastAngle = armAngle;
         const elbowAngle = angle(shoulder, elbow, wrist);
         const armStraight = elbowAngle > 150;
-
-        if (armAngle > 40 && !armStraight) { formIsGood = false; formMsg = 'Keep your arm straight'; }
-        else { formIsGood = true; formMsg = ''; }
-
-        debugEl.textContent = 'ARM:' + Math.round(armAngle) + ' ELBOW:' + Math.round(elbowAngle)
-          + (armStraight ? ' straight' : ' BENT') + ' ' + stage + ' reps:' + count;
-
-        if (armAngle > 70 && armStraight && stage === 'up') { stage = 'down'; formBadThisRep = false; }
-        if (armAngle < 30 && stage === 'down') {
-          stage = 'up';
-          if (!formBadThisRep) {
-            count++;
-            send({ type: 'counter', current_count: count });
-            statusEl.textContent = 'REP ' + count + '!'; statusEl.style.color = '#5DCAA5';
-          } else {
-            statusEl.textContent = 'Bad form — not counted'; statusEl.style.color = '#E24B4A';
-          }
-        }
+        formIsGood = !(armAngle > 40 && !armStraight);
+        formMsg = formIsGood ? '' : 'Keep your arm straight';
+        debugEl.textContent = 'ARM:' + Math.round(armAngle) + ' ELBOW:' + Math.round(elbowAngle) + ' ' + stage + ' reps:' + count;
+        if (armAngle > 70 && stage === 'up') stage = 'down';
+        if (armAngle < 30 && stage === 'down') { stage = 'up'; rep(); }
       },
 
-      // PUSH-UP — kept as-is (parked / experimental); no strict form gate
       pushup: function (keypoints) {
         const shoulder = kp(keypoints, 'left_shoulder');
         const wrist = kp(keypoints, 'left_wrist');
         const nose = kp(keypoints, 'nose');
         if (!(shoulder && nose)) { debugEl.textContent = 'show your head & shoulders'; return; }
-
         const ref = wrist ? wrist.y : (shoulder.y + 200);
         const headHeight = smooth(ref - nose.y);
         lastAngle = headHeight;
         formIsGood = true; formMsg = '';
-
         if (headHeight > headMax) headMax = headHeight;
         if (headHeight < headMin) headMin = headHeight;
         const range = headMax - headMin;
-
         debugEl.textContent = 'HEAD:' + Math.round(headHeight) + ' [' + Math.round(headMin) + '-' + Math.round(headMax) + '] ' + stage + ' reps:' + count;
-
         if (range < 40) { statusEl.textContent = 'Do one full push-up to calibrate'; return; }
-
         const downThresh = headMin + range * 0.4;
         const upThresh = headMax - range * 0.4;
-
         if (headHeight < downThresh && stage === 'up') { stage = 'down'; statusEl.textContent = 'UP — push!'; }
-        if (headHeight > upThresh && stage === 'down') {
-          stage = 'up'; count++;
-          send({ type: 'counter', current_count: count });
-          statusEl.textContent = 'REP ' + count + '!';
-        }
+        if (headHeight > upThresh && stage === 'down') { stage = 'up'; rep(); }
       },
 
-      // SIDE LEG RAISE — bad form: raise too shallow (not lifting the leg enough)
       sidelegraise: function (keypoints) {
         const leftAnkle = kp(keypoints, 'left_ankle');
         const rightAnkle = kp(keypoints, 'right_ankle');
         if (!(leftAnkle && rightAnkle)) { debugEl.textContent = 'show both feet'; return; }
-
         const diff = leftAnkle.y - rightAnkle.y;
         const liftHeight = Math.abs(diff);
         const whichLeg = diff < 0 ? 'LEFT' : 'RIGHT';
         const raised = liftHeight > 60;
-
-        if (liftHeight > 30 && liftHeight <= 60 && stage === 'up') { formIsGood = false; formMsg = 'Lift your leg higher'; }
-        else { formIsGood = true; formMsg = ''; }
-
+        formIsGood = true; formMsg = '';
         debugEl.textContent = 'LIFT:' + Math.round(liftHeight) + ' (' + whichLeg + ') ' + stage + ' reps:' + count;
-
-        if (raised && stage === 'up') { stage = 'down'; formBadThisRep = false; statusEl.textContent = 'Lower your leg'; statusEl.style.color = '#5DCAA5'; }
-        if (liftHeight < 30 && stage === 'down') {
-          stage = 'up';
-          if (!formBadThisRep) {
-            count++;
-            send({ type: 'counter', current_count: count });
-            statusEl.textContent = 'REP ' + count + '!'; statusEl.style.color = '#5DCAA5';
-          } else {
-            statusEl.textContent = 'Bad form — not counted'; statusEl.style.color = '#E24B4A';
-          }
-        }
+        if (raised && stage === 'up') { stage = 'down'; statusEl.textContent = 'Lower your leg'; statusEl.style.color = '#5DCAA5'; }
+        if (liftHeight < 30 && stage === 'down') { stage = 'up'; rep(); }
       },
 
-      // KNEE RAISE — bad form: knee not raised high enough
       kneeraise: function (keypoints) {
         const leftHip = kp(keypoints, 'left_hip');
         const rightHip = kp(keypoints, 'right_hip');
         const leftKnee = kp(keypoints, 'left_knee');
         const rightKnee = kp(keypoints, 'right_knee');
         if (!(leftHip && rightHip)) { debugEl.textContent = 'show your full body'; return; }
-
         const hipY = (leftHip.y + rightHip.y) / 2;
-
         let workingKnee = null;
-        if (leftKnee && rightKnee) {
-          workingKnee = leftKnee.score >= rightKnee.score ? leftKnee : rightKnee;
-        } else {
-          workingKnee = leftKnee || rightKnee;
-        }
+        if (leftKnee && rightKnee) workingKnee = leftKnee.score >= rightKnee.score ? leftKnee : rightKnee;
+        else workingKnee = leftKnee || rightKnee;
         if (!workingKnee) { debugEl.textContent = 'leg not visible'; return; }
-
         const kneeToHip = workingKnee.y - hipY;
         const raised = kneeToHip < 50;
         const down = kneeToHip > 90;
-
-        if (kneeToHip >= 50 && kneeToHip <= 75 && stage === 'up') { formIsGood = false; formMsg = 'Raise your knee higher'; }
-        else { formIsGood = true; formMsg = ''; }
-
+        formIsGood = true; formMsg = '';
         debugEl.textContent = 'KNEE-HIP:' + Math.round(kneeToHip) + ' conf:' + Math.round(workingKnee.score*100) + '% ' + stage + ' reps:' + count;
-
-        if (raised && stage === 'up') { stage = 'down'; formBadThisRep = false; statusEl.textContent = 'Lower'; statusEl.style.color = '#5DCAA5'; }
-        if (down && stage === 'down') {
-          stage = 'up';
-          if (!formBadThisRep) {
-            count++;
-            send({ type: 'counter', current_count: count });
-            statusEl.textContent = 'REP ' + count + '!'; statusEl.style.color = '#5DCAA5';
-          } else {
-            statusEl.textContent = 'Bad form — not counted'; statusEl.style.color = '#E24B4A';
-          }
-        }
+        if (raised && stage === 'up') { stage = 'down'; statusEl.textContent = 'Lower'; statusEl.style.color = '#5DCAA5'; }
+        if (down && stage === 'down') { stage = 'up'; rep(); }
       },
 
-      // TRICEP EXTENSION — bad form: not fully extending overhead (half rep)
       tricepextension: function (keypoints) {
         const shoulder = kp(keypoints, 'left_shoulder');
         const elbow = kp(keypoints, 'left_elbow');
         const wrist = kp(keypoints, 'left_wrist');
         if (!(shoulder && elbow && wrist)) { debugEl.textContent = 'show your arm overhead'; return; }
-
         const elbowAngle = smooth(angle(shoulder, elbow, wrist));
         lastAngle = elbowAngle;
-
-        if (stage === 'down' && elbowAngle < 150) { formIsGood = false; formMsg = 'Extend your arms fully'; }
-        else { formIsGood = true; formMsg = ''; }
-
+        formIsGood = true; formMsg = '';
         debugEl.textContent = 'ELBOW:' + Math.round(elbowAngle) + ' ' + stage + ' reps:' + count;
-
-        if (elbowAngle > 150 && stage === 'up') { stage = 'down'; formBadThisRep = false; }
-        if (elbowAngle < 90 && stage === 'down') {
-          stage = 'up';
-          if (!formBadThisRep) {
-            count++;
-            send({ type: 'counter', current_count: count });
-            statusEl.textContent = 'REP ' + count + '!'; statusEl.style.color = '#5DCAA5';
-          } else {
-            statusEl.textContent = 'Bad form — not counted'; statusEl.style.color = '#E24B4A';
-          }
-        }
+        if (elbowAngle > 150 && stage === 'up') stage = 'down';
+        if (elbowAngle < 90 && stage === 'down') { stage = 'up'; rep(); }
       },
 
-      // SUMO SQUAT — same back-angle form check as squat
       sumosquat: function (keypoints) {
         const hip = kp(keypoints, 'left_hip');
         const knee = kp(keypoints, 'left_knee');
         const ankle = kp(keypoints, 'left_ankle');
         const shoulder = kp(keypoints, 'left_shoulder');
         if (!(hip && knee && ankle)) { debugEl.textContent = 'show your legs'; return; }
-
         const kneeAngle = smooth(angle(hip, knee, ankle));
         lastAngle = kneeAngle;
         const backAngle = shoulder ? angle(shoulder, hip, knee) : 180;
-
-        if (stage === 'down' && backAngle <= 45) { formIsGood = false; formMsg = 'Keep your back upright'; }
-        else { formIsGood = true; formMsg = ''; }
-
+        formIsGood = !(stage === 'down' && backAngle <= 45);
+        formMsg = formIsGood ? '' : 'Keep your back upright';
         debugEl.textContent = 'KNEE:' + Math.round(kneeAngle) + ' BACK:' + Math.round(backAngle) + ' ' + stage + ' reps:' + count;
         countRep(kneeAngle, 130, 150);
       },
 
-      // SIDE BEND — bad form: bend too shallow (not a real side bend)
       sidebend: function (keypoints) {
         const leftShoulder = kp(keypoints, 'left_shoulder');
         const rightShoulder = kp(keypoints, 'right_shoulder');
         const leftHip = kp(keypoints, 'left_hip');
         const rightHip = kp(keypoints, 'right_hip');
         if (!(leftShoulder && rightShoulder && leftHip && rightHip)) { debugEl.textContent = 'show your upper body'; return; }
-
         const shoulderTilt = Math.abs(leftShoulder.y - rightShoulder.y);
         const hipWidth = Math.abs(leftHip.x - rightHip.x);
         const tiltRatio = hipWidth > 0 ? shoulderTilt / hipWidth : 0;
         const smoothedTilt = smooth(tiltRatio * 100);
-
         const bent = smoothedTilt > 40;
         const upright = smoothedTilt < 20;
-
-        if (smoothedTilt >= 20 && smoothedTilt <= 40 && stage === 'up') { formIsGood = false; formMsg = 'Bend further to the side'; }
-        else { formIsGood = true; formMsg = ''; }
-
+        formIsGood = true; formMsg = '';
         debugEl.textContent = 'TILT:' + Math.round(smoothedTilt) + ' need>40 ' + stage + ' reps:' + count;
-
-        if (bent && stage === 'up') { stage = 'down'; formBadThisRep = false; statusEl.textContent = 'Back to center'; statusEl.style.color = '#5DCAA5'; }
-        if (upright && stage === 'down') {
-          stage = 'up';
-          if (!formBadThisRep) {
-            count++;
-            send({ type: 'counter', current_count: count });
-            statusEl.textContent = 'REP ' + count + '!'; statusEl.style.color = '#5DCAA5';
-          } else {
-            statusEl.textContent = 'Bad form — not counted'; statusEl.style.color = '#E24B4A';
-          }
-        }
+        if (bent && stage === 'up') { stage = 'down'; statusEl.textContent = 'Back to center'; statusEl.style.color = '#5DCAA5'; }
+        if (upright && stage === 'down') { stage = 'up'; rep(); }
       },
 
     };
 
-    // Runs ONE detection + draw pass (no scheduling here)
     async function detectOnce() {
       const poses = await detector.estimatePoses(video);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       if (poses.length > 0) {
         const keypoints = poses[0].keypoints;
-
-        // run exercise logic on RAW keypoints (counting stays accurate)
         const detect = EXERCISES[exercise];
         if (detect) detect(keypoints);
         else debugEl.textContent = 'Unknown exercise: ' + exercise;
 
-        // strict counting: if form is bad at any point during a rep, mark it
-        if (!formIsGood) formBadThisRep = true;
-
-        // smoothed copy for DRAWING only (reduces scatter, counting unaffected)
         const drawKeypoints = keypoints.map(smoothKp);
-
         const color = formIsGood ? '#1D9E75' : '#E24B4A';
 
-        // ---- FAR-VISIBLE FORM BORDER ----
         if (formIsGood) {
           formBorder.style.borderColor = 'rgba(29,158,117,0.55)';
           formBorder.style.borderWidth = '8px';
@@ -543,7 +351,6 @@
           formBorder.style.borderWidth = '22px';
         }
 
-        // thicker, glowing, rounded skeleton lines
         ctx.strokeStyle = color;
         ctx.lineWidth = 8;
         ctx.lineCap = 'round';
@@ -554,48 +361,33 @@
         CONNECTIONS.forEach(([a, b]) => {
           const p1 = kp(drawKeypoints, a), p2 = kp(drawKeypoints, b);
           if (p1 && p2 && p1.score > MIN_SCORE && p2.score > MIN_SCORE) {
-            ctx.beginPath();
-            ctx.moveTo(p1.x, p1.y);
-            ctx.lineTo(p2.x, p2.y);
-            ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
           }
         });
 
         drawKeypoints.forEach(k => {
           if (k.score > MIN_SCORE) {
             ctx.fillStyle = color;
-            ctx.beginPath();
-            ctx.arc(k.x, k.y, 10, 0, 2 * Math.PI);
-            ctx.fill();
+            ctx.beginPath(); ctx.arc(k.x, k.y, 10, 0, 2 * Math.PI); ctx.fill();
             ctx.shadowBlur = 0;
             ctx.fillStyle = '#FFFFFF';
-            ctx.beginPath();
-            ctx.arc(k.x, k.y, 4, 0, 2 * Math.PI);
-            ctx.fill();
+            ctx.beginPath(); ctx.arc(k.x, k.y, 4, 0, 2 * Math.PI); ctx.fill();
           }
         });
 
         ctx.shadowBlur = 0;
-
         send({ type: 'form', good: formIsGood, msg: formMsg });
       }
     }
 
-    // SELF-SCHEDULING LOOP with busy-guard:
-    // runs the next frame only AFTER the current one finishes, so detections never
-    // pile up into a laggy backlog. This is the main speed/responsiveness fix.
     let running = false;
     async function loop() {
       if (detector && video.readyState === 4 && !running) {
         running = true;
-        try {
-          await detectOnce();
-        } catch (e) {
-          debugEl.textContent = 'detect err: ' + e.message;
-        }
+        try { await detectOnce(); }
+        catch (e) { debugEl.textContent = 'detect err: ' + e.message; }
         running = false;
       }
-      // schedule next frame as soon as possible (requestAnimationFrame syncs to the screen refresh)
       requestAnimationFrame(loop);
     }
 
@@ -613,7 +405,7 @@
           { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING }
         );
         statusEl.textContent = 'Get into position';
-        requestAnimationFrame(loop);   // start the self-scheduling loop
+        requestAnimationFrame(loop);
       } catch (err) {
         debugEl.textContent = 'Error: ' + err.message;
       }
