@@ -84,7 +84,7 @@ export default function Home() {
       <View style={styles.topBar}>
         <View>
           <Text style={styles.hello}>Hello,</Text>
-          <Text style={styles.username}>{user?.username || "there"}</Text>
+          <Text style={styles.username}>{user?.name || user?.username || "there"}</Text>
         </View>
         <View style={styles.topBarRight}>
           {/* Notifications bell — parked until dev build is set up */}

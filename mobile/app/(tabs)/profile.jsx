@@ -35,6 +35,8 @@ export default function Profile() {
         weightKg: res.data.weightKg?.toString() || "",
       });
       setPhoto(res.data.photo || "");
+      // keep the store in sync on load too, so Home's greeting matches
+      await setUser({ ...user, ...res.data });
     } catch (error) {
       Alert.alert("Error", error.response?.data?.message || "Failed to load profile");
     } finally {
@@ -45,15 +47,29 @@ export default function Profile() {
   const saveProfile = async () => {
     setSaving(true);
     try {
-      const res = await api.put("/profile", {
+      // 1) send the update
+      await api.put("/profile", {
         name: form.name,
         bio: form.bio,
         gender: form.gender,
         heightCm: form.heightCm ? Number(form.heightCm) : undefined,
         weightKg: form.weightKg ? Number(form.weightKg) : undefined,
       });
-      // keep the store in sync (preserve username/email/flag that aren't in this form)
-      await setUser({ ...user, ...res.data });
+
+      // 2) re-fetch the fresh profile from the server to confirm what was actually saved
+      const fresh = await api.get("/profile");
+      setForm({
+        name: fresh.data.name || "",
+        bio: fresh.data.bio || "",
+        gender: fresh.data.gender || "",
+        heightCm: fresh.data.heightCm?.toString() || "",
+        weightKg: fresh.data.weightKg?.toString() || "",
+      });
+      setPhoto(fresh.data.photo || "");
+
+      // 3) update the store so Home's "Hello, name" updates immediately
+      await setUser({ ...user, ...fresh.data });
+
       Alert.alert("Saved", "Profile updated");
     } catch (error) {
       Alert.alert("Error", error.response?.data?.message || "Failed to save");
