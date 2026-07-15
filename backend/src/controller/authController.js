@@ -82,7 +82,6 @@ export const login = async (req, res) => {
     const token = generateToken(user._id);
 
     // save token to DB - invalidates any previous sessions
-    user.currentToken = token;
     await user.save();
 
     res.status(200).json({

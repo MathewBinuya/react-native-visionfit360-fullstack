@@ -42,7 +42,6 @@ const userSchema = new mongoose.Schema(
     },
     heightCm: Number,
     weightKg: Number,
-    currentToken: { type: String, default: "" },
   },
   { timestamps: true }
 );
