@@ -137,7 +137,8 @@ export default function Profile() {
           <Ionicons name="camera-outline" size={16} color={COLORS.button} />
           <Text style={styles.changePhotoText}>Change photo</Text>
         </TouchableOpacity>
-        <Text style={styles.usernameText}>@{user?.username}</Text>
+        {/* edited username fix*/}
+        <Text style={styles.usernameText}>@{user?.name || user?.username }</Text>
       </View>
 
       {/* Name */}

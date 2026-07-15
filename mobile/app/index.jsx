@@ -54,7 +54,7 @@ export default function Index() {
         resizeMode="contain"
       />
       <Text style={styles.appName}>VisionFIT360</Text>
-      <Text style={styles.tagline}>Your personal fitness coach</Text>
+      <Text style={styles.tagline}>Your Personal Workout Coach</Text>
       <ActivityIndicator size="small" color={COLORS.black} style={{ marginTop: 24 }} />
     </View>
   );
