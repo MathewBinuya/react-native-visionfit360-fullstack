@@ -1,4 +1,5 @@
 import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert, Modal } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useState, useEffect } from 'react'
 import { router } from 'expo-router'
 import { Ionicons } from "@expo/vector-icons"
@@ -7,6 +8,8 @@ import styles from '../assets/styles/workout.style'
 import api from '../lib/axios'
 
 export default function Workout() {
+  const insets = useSafeAreaInsets();
+
   const [activeWorkouts, setActiveWorkouts] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
 
@@ -158,7 +161,7 @@ export default function Workout() {
         onRequestClose={() => setModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+          <View style={[styles.modalCard, { paddingBottom: insets.bottom + 20 }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>New workout</Text>
               <TouchableOpacity onPress={() => setModalVisible(false)}>

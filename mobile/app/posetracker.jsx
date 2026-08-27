@@ -1,4 +1,5 @@
 import { View, Text, TouchableOpacity, ActivityIndicator, Alert, Modal } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useEffect } from 'react'
 import { router, useLocalSearchParams } from 'expo-router'
 import { WebView } from 'react-native-webview'
@@ -10,6 +11,7 @@ import api from '../lib/axios'
 import { AR_EXERCISES } from '../lib/exercises'
 
 export default function PoseTracker() {
+  const insets = useSafeAreaInsets();
   const { exercise = "squat" } = useLocalSearchParams();
 
   const [htmlUri, setHtmlUri] = useState(null);
@@ -117,7 +119,7 @@ export default function PoseTracker() {
       {posture ? <Text style={styles.postureText}>{posture}</Text> : null}
 
       <TouchableOpacity
-        style={[styles.finishBtn, saving && { opacity: 0.6 }]}
+        style={[styles.finishBtn, saving && { opacity: 0.6 }, { marginBottom: insets.bottom + 12 }]}
         onPress={finishSession}
         disabled={saving}
       >

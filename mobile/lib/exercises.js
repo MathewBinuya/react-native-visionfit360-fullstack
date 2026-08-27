@@ -156,6 +156,24 @@ export const AR_EXERCISES = [
       "Keep the movement slow and controlled",
     ],
   },
+  
+  {
+   key: "deadlift",
+   label: "Deadlift",
+   group: "Lower Body",
+   icon: "barbell-outline",
+   targetReps: 8,
+   working: true,
+   tips: [
+     "Stand at 45° to your phone — your side should face the camera.",
+     "Feet hip-width apart, bar over mid-foot.",
+     "Hinge at the hips, keep your back flat and chest up.",
+     "Drive through your heels to stand tall — squeeze glutes at the top.",
+     "Lower the bar with control, keeping it close to your body.",
+     "Good lighting and full body in frame helps tracking.",
+    ],
+  },
+
   {
     key: "pushup",
     label: "Push-ups",
