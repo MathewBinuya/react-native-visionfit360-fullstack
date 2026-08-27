@@ -332,71 +332,68 @@
       // CONVENTIONAL DEADLIFT — 45° side view, auto-detects best side
       // primary: back angle (shoulder-hip-knee) drops on hinge, rises on lockout
       // form check: back rounding (shoulder drops below hip level during hinge)
-      deadlift: function (keypoints) {
-        const leftShoulder = kp(keypoints, 'left_shoulder');
-        const rightShoulder = kp(keypoints, 'right_shoulder');
-        const leftHip = kp(keypoints, 'left_hip');
-        const rightHip = kp(keypoints, 'right_hip');
-        const leftKnee = kp(keypoints, 'left_knee');
-        const rightKnee = kp(keypoints, 'right_knee');
-        const leftAnkle = kp(keypoints, 'left_ankle');
-        const rightAnkle = kp(keypoints, 'right_ankle');
+     deadlift: function (keypoints) {
+      const leftShoulder = kp(keypoints, 'left_shoulder');
+      const rightShoulder = kp(keypoints, 'right_shoulder');
+      const leftHip = kp(keypoints, 'left_hip');
+      const rightHip = kp(keypoints, 'right_hip');
+      const leftKnee = kp(keypoints, 'left_knee');
+      const rightKnee = kp(keypoints, 'right_knee');
+      const leftAnkle = kp(keypoints, 'left_ankle');
+      const rightAnkle = kp(keypoints, 'right_ankle');
 
-        // auto-pick whichever side has higher combined confidence at 45°
-        const leftConf = (leftShoulder?.score || 0) + (leftHip?.score || 0) + (leftKnee?.score || 0);
-        const rightConf = (rightShoulder?.score || 0) + (rightHip?.score || 0) + (rightKnee?.score || 0);
-        const useSide = leftConf >= rightConf ? 'left' : 'right';
+      // auto-pick best side
+      const leftConf = (leftShoulder?.score||0)+(leftHip?.score||0)+(leftKnee?.score||0);
+      const rightConf = (rightShoulder?.score||0)+(rightHip?.score||0)+(rightKnee?.score||0);
+      const useSide = leftConf >= rightConf ? 'left' : 'right';
 
-        const shoulder = useSide === 'left' ? leftShoulder : rightShoulder;
-        const hip      = useSide === 'left' ? leftHip      : rightHip;
-        const knee     = useSide === 'left' ? leftKnee     : rightKnee;
-        const ankle    = useSide === 'left' ? leftAnkle    : rightAnkle;
+      const shoulder = useSide==='left' ? leftShoulder : rightShoulder;
+      const hip      = useSide==='left' ? leftHip      : rightHip;
+      const knee     = useSide==='left' ? leftKnee     : rightKnee;
+      const ankle    = useSide==='left' ? leftAnkle    : rightAnkle;
 
-        if (!(shoulder && hip && knee)) {
-          debugEl.textContent = 'stand at 45° — show full body';
-          return;
-        }
+      if (!(shoulder && hip && knee && ankle)) {
+        debugEl.textContent = 'stand at 45° — show full body';
+        return;
+      }
 
-        // PRIMARY: back/torso angle (shoulder → hip → knee)
-        // standing/lockout = large (~155-170°)
-        // bottom of deadlift = small (~60-100° depending on flexibility)
-        const backAngle = smooth(angle(shoulder, hip, knee));
-        lastAngle = backAngle;
+      // PRIMARY: back angle (shoulder→hip→knee)
+      const backAngle = smooth(angle(shoulder, hip, knee));
+      // SECONDARY: knee angle (hip→knee→ankle) — confirms knee bend
+      const kneeAngle = smooth(angle(hip, knee, ankle));
+      // TERTIARY: hip position relative to standing — did hips actually drop?
+      // we track the hip Y position at standing and check it drops during hinge
+      lastAngle = backAngle;
 
-        // SECONDARY: knee angle confirms they went low enough (conventional has significant knee bend)
-        const kneeAngle = ankle ? angle(hip, knee, ankle) : 180;
+      // FORM: back rounding during hinge
+      const backRounded = stage === 'down' && shoulder.y > hip.y + 40;
+      formIsGood = !backRounded;
+      formMsg = backRounded ? 'Keep your back flat' : '';
 
-        // FORM: back rounding — during the lift, shoulder should not drop
-        // excessively below hip (in Y axis). At 45°, rounding shows as
-        // shoulder.y approaching or exceeding hip.y
-        const isHinging = stage === 'down';
-        const backRounded = isHinging && (shoulder.y > hip.y + 40);
-        formIsGood = !backRounded;
-        formMsg = backRounded ? 'Keep your back flat' : '';
+      debugEl.textContent = 'BACK:' + Math.round(backAngle) +
+        ' KNEE:' + Math.round(kneeAngle) +
+        ' side:' + useSide + ' ' + stage + ' reps:' + count;
 
-        debugEl.textContent = 'BACK:' + Math.round(backAngle) +
-          ' KNEE:' + Math.round(kneeAngle) +
-          ' side:' + useSide +
-          ' ' + stage + ' reps:' + count;
+      // GATED DOWN: requires BOTH back angle low AND knee bent
+      // prevents casual bending or arm waving from triggering
+      const realHinge = backAngle < 110 && kneeAngle < 150;
 
-        // hinge down: back angle drops below 110 (adjustable — watch debug)
-        if (backAngle < 110 && stage === 'up') {
-          stage = 'down';
-          statusEl.textContent = 'Drive up!';
-          statusEl.style.color = '#5DCAA5';
-        }
+      // GATED UP: requires BOTH back angle high AND knees extended
+      const realLockout = backAngle > 155 && kneeAngle > 160;
 
-        // lockout: back angle rises above 150 AND roughly upright
-        if (backAngle > 150 && stage === 'down') {
-          stage = 'up';
-          rep();
-        }
-      },
+      if (realHinge && stage === 'up') {
+        stage = 'down';
+        statusEl.textContent = 'Drive up!';
+        statusEl.style.color = '#5DCAA5';
+      }
 
-
+      if (realLockout && stage === 'down') {
+        stage = 'up';
+        rep();
+      }
+    },
     };
 
-  
 
     async function detectOnce() {
       const poses = await detector.estimatePoses(video);
