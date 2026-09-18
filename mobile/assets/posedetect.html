@@ -19,6 +19,56 @@
       box-sizing: border-box;
       transition: border-color 0.15s ease, border-width 0.15s ease;
     }
+
+    /* --- 15s pre-start countdown --- */
+    #countdownOverlay {
+      position: absolute;
+      inset: 0;
+      z-index: 20;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      background: rgba(0, 0, 0, 0.45);
+    }
+    #countdownRing {
+      position: relative;
+      width: 170px;
+      height: 170px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: conic-gradient(#5DCAA5 var(--progress, 360deg), rgba(255, 255, 255, 0.18) 0deg);
+      transition: background 0.9s linear;
+    }
+    #countdownInner {
+      width: 142px;
+      height: 142px;
+      border-radius: 50%;
+      background: #0a0a0a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #countdownNumber {
+      font-family: sans-serif;
+      font-size: 56px;
+      font-weight: bold;
+      color: #fff;
+    }
+    #countdownNumber.pulse { animation: countPulse 0.35s ease-out; }
+    @keyframes countPulse {
+      0% { transform: scale(1.25); opacity: 0.3; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+    #countdownLabel {
+      margin-top: 20px;
+      font-family: sans-serif;
+      font-size: 18px;
+      color: #fff;
+      opacity: 0.85;
+    }
   </style>
 </head>
 <body>
@@ -31,6 +81,15 @@
     <video id="video" autoplay playsinline></video>
     <canvas id="canvas"></canvas>
     <div id="formBorder"></div>
+
+    <div id="countdownOverlay">
+      <div id="countdownRing">
+        <div id="countdownInner">
+          <div id="countdownNumber">15</div>
+        </div>
+      </div>
+      <div id="countdownLabel">Get into position</div>
+    </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
@@ -455,6 +514,46 @@
       requestAnimationFrame(loop);
     }
 
+    // --- 15-second pre-start countdown ---
+    // Shows once the camera + model are ready, so the user has time to
+    // position themselves before rep counting (the AR loop) begins.
+    function startCountdown(seconds, onDone) {
+      const overlay = document.getElementById('countdownOverlay');
+      const ring = document.getElementById('countdownRing');
+      const numberEl = document.getElementById('countdownNumber');
+      const labelEl = document.getElementById('countdownLabel');
+
+      let remaining = seconds;
+      overlay.style.display = 'flex';
+      numberEl.textContent = remaining;
+      labelEl.textContent = 'Get into position';
+      ring.style.setProperty('--progress', '360deg');
+      send({ type: 'countdown', seconds: remaining, total: seconds });
+
+      const tick = setInterval(() => {
+        remaining--;
+        if (remaining > 0) {
+          numberEl.textContent = remaining;
+          ring.style.setProperty('--progress', Math.round((remaining / seconds) * 360) + 'deg');
+          numberEl.classList.remove('pulse');
+          void numberEl.offsetWidth; // restart the pulse animation each tick
+          numberEl.classList.add('pulse');
+          send({ type: 'countdown', seconds: remaining, total: seconds });
+        } else {
+          clearInterval(tick);
+          ring.style.setProperty('--progress', '0deg');
+          numberEl.textContent = 'GO!';
+          labelEl.textContent = '';
+          send({ type: 'countdown', seconds: 0, total: seconds });
+          setTimeout(() => {
+            overlay.style.display = 'none';
+            send({ type: 'ar_started' });
+            onDone();
+          }, 500);
+        }
+      }, 1000);
+    }
+
     async function init() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -469,7 +568,11 @@
           { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING }
         );
         statusEl.textContent = 'Get into position';
-        requestAnimationFrame(loop);
+        startCountdown(15, () => {
+          statusEl.textContent = 'Go!';
+          statusEl.style.color = '#5DCAA5';
+          requestAnimationFrame(loop);
+        });
       } catch (err) {
         debugEl.textContent = 'Error: ' + err.message;
       }

@@ -37,6 +37,52 @@ const styles = StyleSheet.create({
   },
   workoutTitle: { fontSize: 15, fontWeight: "600", color: COLORS.black, marginBottom: 6, fontFamily: "GeneralSans-Variable" },
   workoutExercise: { fontSize: 13, color: COLORS.placeholderText, marginBottom: 2, fontFamily: "GeneralSans-Variable" },
+  workoutDate: { fontSize: 12, color: COLORS.placeholderText, fontFamily: "GeneralSans-Variable" },
+
+  exerciseBlock: { marginBottom: 8 },
+  exerciseName: { fontSize: 14, fontWeight: "600", color: COLORS.black, marginBottom: 2, fontFamily: "GeneralSans-Variable" },
+  setLine: { fontSize: 12, color: COLORS.placeholderText, marginBottom: 1, fontFamily: "GeneralSans-Variable" },
+
+  // "Mark Complete" button on each workout card
+  completeBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.button,
+    borderRadius: 10,
+    height: 44,
+    marginTop: 12,
+    gap: 6,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  completeText: { color: COLORS.white, fontSize: 14, fontWeight: "700", fontFamily: "GeneralSans-Variable" },
+
+  // Routine Name / Exercise name / Sets / Reps / Weight fields (Add Workout form)
+  inputLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: COLORS.gray,
+    marginTop: 12,
+    marginBottom: 6,
+    fontFamily: "GeneralSans-Variable",
+  },
+  input: {
+    backgroundColor: COLORS.inputBackground,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingHorizontal: 12,
+    height: 48,
+    fontSize: 15,
+    fontWeight: "600",
+    color: COLORS.black,
+    fontFamily: "GeneralSans-Variable",
+  },
+
   doneBtn: {
     flexDirection: "row",
     alignItems: "center",

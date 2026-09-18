@@ -1,251 +1,605 @@
-import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert, Modal } from 'react-native'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { View, Text, TextInput, TouchableOpacity,
+  ScrollView, Alert, ActivityIndicator,
+  KeyboardAvoidingView, Platform, BackHandler
+} from 'react-native'
 import { useState, useEffect } from 'react'
 import { router } from 'expo-router'
 import { Ionicons } from "@expo/vector-icons"
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import COLORS from "../constants/colors"
 import styles from '../assets/styles/workout.style'
 import api from '../lib/axios'
 
 export default function Workout() {
   const insets = useSafeAreaInsets();
+  const [workouts, setWorkouts] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const [activeWorkouts, setActiveWorkouts] = useState([]);
-  const [modalVisible, setModalVisible] = useState(false);
-
-  // form state (inside the popup)
-  const [title, setTitle] = useState("");
-  const [exercises, setExercises] = useState([{ name: "", sets: [{ reps: "", weightKg: "" }] }]);
+  //  ADD WORKOUT MODAL STATE 
+  const [showAdd, setShowAdd] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [newExercise, setNewExercise] = useState('');
+  const [newSets, setNewSets] = useState('');
+  const [newReps, setNewReps] = useState('');
+  const [newWeight, setNewWeight] = useState('');
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    loadActive();
-  }, []);
+  //  THREE DOTS MENU STATE 
+  const [menuWorkout, setMenuWorkout] = useState(null);
 
-  // load workouts that are not completed yet
-  const loadActive = async () => {
+  //  EDIT MODAL STATE 
+  const [showEdit, setShowEdit] = useState(false);
+  const [editWorkout, setEditWorkout] = useState(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editExercises, setEditExercises] = useState([]);
+  const [editSaving, setEditSaving] = useState(false);
+
+  useEffect(() => { loadWorkouts(); }, []);
+
+  //  ANDROID HARDWARE BACK BUTTON 
+  useEffect(() => {
+    const backAction = () => {
+      if (showAdd) { setShowAdd(false); return true; }
+      if (showEdit) { setShowEdit(false); return true; }
+      if (menuWorkout) { setMenuWorkout(null); return true; }
+      return false;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', backAction);
+    return () => sub.remove();
+  }, [showAdd, showEdit, menuWorkout]);
+
+  const loadWorkouts = async () => {
     try {
       const res = await api.get("/workouts?completed=false");
-      setActiveWorkouts(res.data);
+      setWorkouts(res.data);
     } catch (error) {
-      console.log("Failed to load active workouts", error.message);
+      console.log("Failed to load workouts", error.message);
+    } finally {
+      setLoading(false);
     }
   };
 
-  // forms for workout
-  const addExercise = () =>
-    setExercises([...exercises, { name: "", sets: [{ reps: "", weightKg: "" }] }]);
-
-  const removeExercise = (i) =>
-    setExercises(exercises.filter((_, idx) => idx !== i));
-
-  const updateExerciseName = (i, value) => {
-    const next = [...exercises];
-    next[i].name = value;
-    setExercises(next);
+  //  OPEN EDIT MODAL 
+  const openEdit = (w) => {
+    setMenuWorkout(null);
+    setEditWorkout(w);
+    setEditTitle(w.title || '');
+    setEditExercises(w.exercises?.map(ex => ({
+      name: ex.name || '',
+      sets: ex.sets?.map(s => ({
+        reps: s.reps?.toString() || '',
+        weightKg: s.weightKg?.toString() || '',
+        restSeconds: s.restSeconds?.toString() || '60',
+        completed: s.completed || false,
+      })) || []
+    })) || []);
+    setShowEdit(true);
   };
 
-  const addSet = (exIndex) => {
-    const next = [...exercises];
-    next[exIndex].sets.push({ reps: "", weightKg: "" });
-    setExercises(next);
+  //  EDIT HELPERS 
+  const updateExerciseName = (exIdx, name) => {
+    const updated = [...editExercises];
+    updated[exIdx] = { ...updated[exIdx], name };
+    setEditExercises(updated);
   };
 
-  const removeSet = (exIndex, setIndex) => {
-    const next = [...exercises];
-    next[exIndex].sets = next[exIndex].sets.filter((_, i) => i !== setIndex);
-    setExercises(next);
+  const updateSet = (exIdx, setIdx, field, value) => {
+    const updated = [...editExercises];
+    updated[exIdx].sets[setIdx] = { ...updated[exIdx].sets[setIdx], [field]: value };
+    setEditExercises(updated);
   };
 
-  const updateSet = (exIndex, setIndex, field, value) => {
-    const next = [...exercises];
-    next[exIndex].sets[setIndex][field] = value;
-    setExercises(next);
+  const addSetToExercise = (exIdx) => {
+    const updated = [...editExercises];
+    updated[exIdx].sets.push({ reps: '', weightKg: '', restSeconds: '60', completed: false });
+    setEditExercises(updated);
   };
 
-  const resetForm = () => {
-    setTitle("");
-    setExercises([{ name: "", sets: [{ reps: "", weightKg: "" }] }]);
+  const removeSet = (exIdx, setIdx) => {
+    const updated = [...editExercises];
+    updated[exIdx].sets = updated[exIdx].sets.filter((_, i) => i !== setIdx);
+    setEditExercises(updated);
   };
 
-  //  save a new workout (from popup) 
+  const addExercise = () => {
+    setEditExercises([...editExercises, {
+      name: '',
+      sets: [{ reps: '', weightKg: '', restSeconds: '60', completed: false }]
+    }]);
+  };
+
+  const removeExercise = (exIdx) => {
+    setEditExercises(editExercises.filter((_, i) => i !== exIdx));
+  };
+
+  //  SAVE EDIT 
+  const saveEdit = async () => {
+    if (!editTitle.trim()) { Alert.alert("Missing", "Please enter a workout title"); return; }
+    setEditSaving(true);
+    try {
+      const payload = {
+        title: editTitle.trim(),
+        exercises: editExercises.map(ex => ({
+          name: ex.name,
+          sets: ex.sets.map(s => ({
+            reps: Number(s.reps) || 0,
+            weightKg: Number(s.weightKg) || 0,
+            restSeconds: Number(s.restSeconds) || 60,
+            completed: s.completed,
+          }))
+        }))
+      };
+      const res = await api.put(`/workouts/${editWorkout._id}`, payload);
+      setWorkouts(prev => prev.map(w => w._id === editWorkout._id ? res.data : w));
+      setShowEdit(false);
+      setEditWorkout(null);
+    } catch (error) {
+      Alert.alert("Error", error.response?.data?.message || "Failed to save changes");
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  //  COMPLETE WORKOUT 
+  const completeWorkout = async (id) => {
+    try {
+      await api.patch(`/workouts/${id}/complete`);
+      setWorkouts(prev => prev.filter(w => w._id !== id));
+    } catch (error) {
+      Alert.alert("Error", error.response?.data?.message || "Failed to complete workout");
+    }
+  };
+
+  //  DELETE WORKOUT 
+  const confirmDelete = (id, title) => {
+    setMenuWorkout(null);
+    Alert.alert(
+      "Delete workout",
+      `Remove "${title || "this workout"}"?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete", style: "destructive", onPress: () => deleteWorkout(id) },
+      ]
+    );
+  };
+
+  const deleteWorkout = async (id) => {
+    try {
+      await api.delete(`/workouts/${id}`);
+      setWorkouts(prev => prev.filter(w => w._id !== id));
+    } catch (error) {
+      Alert.alert("Error", error.response?.data?.message || "Failed to delete");
+    }
+  };
+
+  //  SAVE NEW WORKOUT 
   const saveWorkout = async () => {
-    if (!title.trim()) {
-      Alert.alert("Hold on", "Give your workout a title");
-      return;
-    }
-    const validExercises = exercises.filter((ex) => ex.name.trim());
-    if (validExercises.length === 0) {
-      Alert.alert("Hold on", "Add at least one exercise");
-      return;
-    }
-
-    const payload = {
-      title: title.trim(),
-      exercises: validExercises.map((ex) => ({
-        name: ex.name.trim(),
-        sets: ex.sets
-          .filter((s) => s.reps || s.weightKg)
-          .map((s) => ({ reps: Number(s.reps) || 0, weightKg: Number(s.weightKg) || 0 })),
-      })),
-    };
-
+    if (!newTitle.trim()) { Alert.alert("Missing", "Please enter a workout title"); return; }
     setSaving(true);
     try {
-      await api.post("/workouts", payload);   // defaults to completed:false - active
-      resetForm();
-      setModalVisible(false);
-      loadActive();   // refresh the list
+      const payload = {
+        title: newTitle.trim(),
+        date: new Date().toISOString(),
+        exercises: newExercise.trim() ? [{
+          name: newExercise.trim(),
+          sets: [{
+            reps: Number(newReps) || 0,
+            weightKg: Number(newWeight) || 0,
+            restSeconds: 60,
+            completed: false,
+          }]
+        }] : [],
+      };
+      const res = await api.post("/workouts", payload);
+      setWorkouts(prev => [res.data, ...prev]);
+      setShowAdd(false);
+      setNewTitle(''); setNewExercise('');
+      setNewSets(''); setNewReps(''); setNewWeight('');
     } catch (error) {
-      Alert.alert("Error", error.response?.data?.message || "Failed to save workout");
+      Alert.alert("Error", error.response?.data?.message || "Failed to save");
     } finally {
       setSaving(false);
     }
   };
 
-  //   mark a workout as done - moves to history 
-  const markDone = async (id) => {
-    try {
-      await api.patch(`/workouts/${id}/complete`);
-      loadActive();   // it leaves the active list
-    } catch (error) {
-      Alert.alert("Error", error.response?.data?.message || "Failed to mark done");
-    }
-  };
-
   return (
     <View style={styles.container}>
-      {/* header */}
+      {/* HEADER */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color={COLORS.black} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Workout Tracker</Text>
-        <View style={{ width: 24 }} />
+        <Text style={styles.headerTitle}>Workouts</Text>
+        <TouchableOpacity onPress={() => setShowAdd(true)}>
+          <Ionicons name="add" size={28} color={COLORS.black} />
+        </TouchableOpacity>
       </View>
 
+      {/* WORKOUT LIST */}
       <ScrollView contentContainerStyle={{ padding: 16 }}>
-        {/* add workout button */}
-        <TouchableOpacity style={styles.addBtn} onPress={() => setModalVisible(true)}>
-          <Ionicons name="add" size={20} color={COLORS.white} />
-          <Text style={styles.addBtnText}>Add workout</Text>
-        </TouchableOpacity>
-
-        {/* active workouts list */}
-        <Text style={styles.sectionTitle}>Active workouts</Text>
-        {activeWorkouts.length === 0 ? (
-          <Text style={styles.empty}>No active workouts. Tap “Add workout” to start.</Text>
+        {loading ? (
+          <ActivityIndicator size="large" color={COLORS.button} style={{ marginTop: 40 }} />
+        ) : workouts.length === 0 ? (
+          <Text style={styles.empty}>No workouts yet — tap + to add one</Text>
         ) : (
-          activeWorkouts.map((w) => (
+          workouts.map((w) => (
             <View key={w._id} style={styles.workoutCard}>
-              <Text style={styles.workoutTitle}>{w.title}</Text>
+              {/* card top: title + ⋮ */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.workoutTitle}>{w.title || "Workout"}</Text>
+                  <Text style={styles.workoutDate}>
+                    {new Date(w.date).toLocaleDateString()}
+                  </Text>
+                </View>
+                {/* THREE DOTS */}
+                <TouchableOpacity
+                  onPress={() => setMenuWorkout(w)}
+                  hitSlop={10}
+                  style={{ padding: 4 }}
+                >
+                  <Ionicons name="ellipsis-vertical" size={20} color={COLORS.placeholderText} />
+                </TouchableOpacity>
+              </View>
+
+              {/* exercises */}
               {w.exercises?.map((ex, i) => (
-                <Text key={i} style={styles.workoutExercise}>
-                  {ex.name} — {ex.sets?.length || 0} set(s)
-                </Text>
+                <View key={i} style={styles.exerciseBlock}>
+                  <Text style={styles.exerciseName}>{ex.name}</Text>
+                  {ex.sets?.map((s, si) => (
+                    <Text key={si} style={styles.setLine}>
+                      Set {si + 1}: {s.reps || 0} reps × {s.weightKg || 0} kg · {s.restSeconds || 60}s rest
+                    </Text>
+                  ))}
+                </View>
               ))}
-              <TouchableOpacity style={styles.doneBtn} onPress={() => markDone(w._id)}>
-                <Ionicons name="checkmark" size={16} color={COLORS.white} />
-                <Text style={styles.doneText}>Mark as done</Text>
+
+              {/* complete button */}
+              <TouchableOpacity
+                style={styles.completeBtn}
+                onPress={() => completeWorkout(w._id)}
+              >
+                <Ionicons name="checkmark-circle-outline" size={18} color={COLORS.white} />
+                <Text style={styles.completeText}>Mark Complete</Text>
               </TouchableOpacity>
             </View>
           ))
         )}
       </ScrollView>
 
-      {/* Modals add workout form */}
-      <Modal
-        visible={modalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { paddingBottom: insets.bottom + 20 }]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>New workout</Text>
-              <TouchableOpacity onPress={() => setModalVisible(false)}>
-                <Ionicons name="close" size={24} color={COLORS.black} />
+      {/* ── THREE DOTS MENU OVERLAY (was Modal — Modal's separate native window
+           doesn't resize with the keyboard under Android edge-to-edge) ── */}
+      {!!menuWorkout && (
+        <View style={{
+          position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+          zIndex: 50, elevation: 50,
+        }}>
+          <TouchableOpacity
+            style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }}
+            activeOpacity={1}
+            onPress={() => setMenuWorkout(null)}
+          >
+            <View style={{
+              position: 'absolute',
+              bottom: insets.bottom + 16,
+              left: 24, right: 24,
+              backgroundColor: COLORS.white,
+              borderRadius: 16,
+              borderWidth: 1,
+              borderColor: COLORS.border,
+              overflow: 'hidden',
+            }}>
+              {/* header */}
+              <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: COLORS.border }}>
+                <Text style={{ fontWeight: '700', fontSize: 15, color: COLORS.black }}>
+                  {menuWorkout?.title || "Workout"}
+                </Text>
+                <Text style={{ fontSize: 13, color: COLORS.gray, marginTop: 2 }}>
+                  {menuWorkout ? new Date(menuWorkout.date).toLocaleDateString() : ''}
+                </Text>
+              </View>
+
+              {/* EDIT */}
+              <TouchableOpacity
+                onPress={() => openEdit(menuWorkout)}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 14,
+                  padding: 16, borderBottomWidth: 1, borderBottomColor: COLORS.border,
+                }}
+              >
+                <Ionicons name="create-outline" size={20} color={COLORS.button} />
+                <View>
+                  <Text style={{ fontSize: 15, fontWeight: '600', color: COLORS.button }}>
+                    Edit workout
+                  </Text>
+                  <Text style={{ fontSize: 12, color: COLORS.gray, marginTop: 1 }}>
+                    Change title, add or remove exercises
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* DELETE */}
+              <TouchableOpacity
+                onPress={() => confirmDelete(menuWorkout?._id, menuWorkout?.title)}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16 }}
+              >
+                <Ionicons name="trash-outline" size={20} color="#E24B4A" />
+                <Text style={{ fontSize: 15, fontWeight: '600', color: '#E24B4A' }}>Delete</Text>
               </TouchableOpacity>
             </View>
-
-            <ScrollView style={{ maxHeight: 420 }}>
-              <TextInput
-                style={styles.titleInput}
-                placeholder="Workout title (e.g. Push Day)"
-                placeholderTextColor={COLORS.black}
-                value={title}
-                onChangeText={setTitle}
-              />
-
-              {exercises.map((ex, exIndex) => (
-                <View key={exIndex} style={styles.exerciseCard}>
-                  <View style={styles.exerciseHeader}>
-                    <TextInput
-                      style={styles.exerciseNameInput}
-                      placeholder="Exercise name"
-                      placeholderTextColor={COLORS.black}
-                      value={ex.name}
-                      onChangeText={(t) => updateExerciseName(exIndex, t)}
-                    />
-                    {exercises.length > 1 && (
-                      <TouchableOpacity onPress={() => removeExercise(exIndex)}>
-                        <Ionicons name="trash-outline" size={18} color={COLORS.black} />
-                      </TouchableOpacity>
-                    )}
-                  </View>
-
-                  {ex.sets.map((set, setIndex) => (
-                    <View key={setIndex} style={styles.setRow}>
-                      <Text style={styles.setLabel}>Set {setIndex + 1}</Text>
-                      <TextInput
-                        style={styles.setInput}
-                        placeholder="reps"
-                        placeholderTextColor={COLORS.black}
-                        value={set.reps}
-                        onChangeText={(t) => updateSet(exIndex, setIndex, "reps", t)}
-                        keyboardType="numeric"
-                      />
-                      <Text style={styles.times}>×</Text>
-                      <TextInput
-                        style={styles.setInput}
-                        placeholder="kg"
-                        placeholderTextColor={COLORS.black}
-                        value={set.weightKg}
-                        onChangeText={(t) => updateSet(exIndex, setIndex, "weightKg", t)}
-                        keyboardType="numeric"
-                      />
-                      {ex.sets.length > 1 && (
-                        <TouchableOpacity onPress={() => removeSet(exIndex, setIndex)}>
-                          <Ionicons name="close" size={18} color={COLORS.black} />
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  ))}
-
-                  <TouchableOpacity onPress={() => addSet(exIndex)} style={styles.addSetBtn}>
-                    <Ionicons name="add" size={16} color={COLORS.button} />
-                    <Text style={styles.addSetText}>Add set</Text>
-                  </TouchableOpacity>
-                </View>
-              ))}
-
-              <TouchableOpacity onPress={addExercise} style={styles.addExerciseBtn}>
-                <Ionicons name="add" size={18} color={COLORS.placeholderText} />
-                <Text style={styles.addExerciseText}>Add exercise</Text>
-              </TouchableOpacity>
-            </ScrollView>
-
-            <TouchableOpacity
-              style={[styles.saveBtn, saving && { opacity: 0.6 }]}
-              onPress={saveWorkout}
-              disabled={saving}
-            >
-              <Text style={styles.saveText}>{saving ? "Saving..." : "Save workout"}</Text>
-            </TouchableOpacity>
-          </View>
+          </TouchableOpacity>
         </View>
-      </Modal>
+      )}
+
+      {/*  EDIT WORKOUT OVERLAY  */}
+      {showEdit && (
+      <View style={{
+        position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+        zIndex: 60, elevation: 60,
+      }}>
+        <View style={{
+          flex: 1, backgroundColor: 'rgba(0,0,0,0.4)',
+          justifyContent: 'center', alignItems: 'center', padding: 20,
+        }}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={{ width: '100%', maxWidth: 480, maxHeight: '85%' }}
+          >
+            <View style={{
+              backgroundColor: COLORS.white,
+              borderRadius: 20,
+              overflow: 'hidden',
+              maxHeight: '100%',
+            }}>
+              {/* edit header */}
+              <View style={{
+                flexDirection: 'row', alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: 20,
+                borderBottomWidth: 1, borderBottomColor: COLORS.border,
+              }}>
+                <Text style={{ fontSize: 18, fontWeight: '700', color: COLORS.black }}>
+                  Edit Workout
+                </Text>
+                <TouchableOpacity onPress={() => setShowEdit(false)}>
+                  <Ionicons name="close" size={24} color={COLORS.black} />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView
+                contentContainerStyle={{ padding: 20 }}
+                keyboardShouldPersistTaps="handled"
+              >
+                {/* title */}
+                <Text style={{ fontSize: 13, fontWeight: '600', color: COLORS.gray, marginBottom: 6 }}>
+                  WORKOUT TITLE
+                </Text>
+                <TextInput
+                  style={{
+                    borderWidth: 1, borderColor: COLORS.border, borderRadius: 10,
+                    padding: 12, fontSize: 15, color: COLORS.black,
+                    backgroundColor: COLORS.inputBackground, marginBottom: 20,
+                  }}
+                  value={editTitle}
+                  onChangeText={setEditTitle}
+                  placeholder="e.g. Upper Body Day"
+                  placeholderTextColor={COLORS.placeholderText}
+                />
+
+                {/* exercises */}
+                {editExercises.map((ex, exIdx) => (
+                  <View key={exIdx} style={{
+                    borderWidth: 1, borderColor: COLORS.border, borderRadius: 12,
+                    padding: 14, marginBottom: 16, backgroundColor: COLORS.inputBackground,
+                  }}>
+                    {/* exercise name + remove */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                      <TextInput
+                        style={{
+                          flex: 1, borderWidth: 1, borderColor: COLORS.border, borderRadius: 8,
+                          padding: 10, fontSize: 14, color: COLORS.black, backgroundColor: COLORS.white,
+                        }}
+                        value={ex.name}
+                        onChangeText={(t) => updateExerciseName(exIdx, t)}
+                        placeholder="Exercise name"
+                        placeholderTextColor={COLORS.placeholderText}
+                      />
+                      <TouchableOpacity onPress={() => removeExercise(exIdx)} hitSlop={8}>
+                        <Ionicons name="close-circle" size={22} color="#E24B4A" />
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* sets */}
+                    {ex.sets.map((s, setIdx) => (
+                      <View key={setIdx} style={{
+                        flexDirection: 'row', gap: 8, marginBottom: 8, alignItems: 'center',
+                      }}>
+                        <Text style={{ fontSize: 12, color: COLORS.gray, width: 36 }}>
+                          Set {setIdx + 1}
+                        </Text>
+                        <TextInput
+                          style={{
+                            flex: 1, borderWidth: 1, borderColor: COLORS.border, borderRadius: 8,
+                            padding: 8, fontSize: 13, color: COLORS.black,
+                            backgroundColor: COLORS.white, textAlign: 'center',
+                          }}
+                          value={s.reps}
+                          onChangeText={(t) => updateSet(exIdx, setIdx, 'reps', t)}
+                          placeholder="Reps"
+                          placeholderTextColor={COLORS.placeholderText}
+                          keyboardType="numeric"
+                        />
+                        <TextInput
+                          style={{
+                            flex: 1, borderWidth: 1, borderColor: COLORS.border, borderRadius: 8,
+                            padding: 8, fontSize: 13, color: COLORS.black,
+                            backgroundColor: COLORS.white, textAlign: 'center',
+                          }}
+                          value={s.weightKg}
+                          onChangeText={(t) => updateSet(exIdx, setIdx, 'weightKg', t)}
+                          placeholder="kg"
+                          placeholderTextColor={COLORS.placeholderText}
+                          keyboardType="numeric"
+                        />
+                        <TouchableOpacity onPress={() => removeSet(exIdx, setIdx)} hitSlop={8}>
+                          <Ionicons name="remove-circle-outline" size={20} color={COLORS.gray} />
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+
+                    {/* add set */}
+                    <TouchableOpacity
+                      onPress={() => addSetToExercise(exIdx)}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}
+                    >
+                      <Ionicons name="add-circle-outline" size={18} color={COLORS.button} />
+                      <Text style={{ fontSize: 13, color: COLORS.button, fontWeight: '600' }}>
+                        Add set
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+
+                {/* add exercise */}
+                <TouchableOpacity
+                  onPress={addExercise}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                    gap: 8, padding: 14, borderRadius: 12,
+                    borderWidth: 1, borderColor: COLORS.border,
+                    borderStyle: 'dashed', marginBottom: 20,
+                  }}
+                >
+                  <Ionicons name="add" size={20} color={COLORS.button} />
+                  <Text style={{ fontSize: 15, color: COLORS.button, fontWeight: '600' }}>
+                    Add exercise
+                  </Text>
+                </TouchableOpacity>
+
+                {/* save */}
+                <TouchableOpacity
+                  onPress={saveEdit}
+                  disabled={editSaving}
+                  style={{
+                    backgroundColor: COLORS.button, borderRadius: 12, padding: 16,
+                    alignItems: 'center', opacity: editSaving ? 0.6 : 1, marginBottom: 8,
+                  }}
+                >
+                  <Text style={{ color: COLORS.white, fontSize: 16, fontWeight: '700' }}>
+                    {editSaving ? 'Saving...' : 'Save changes'}
+                  </Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </View>
+      )}
+
+      {/*  ADD WORKOUT OVERLAY   */}
+      {showAdd && (
+      <View style={{
+        position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+        zIndex: 70, elevation: 70,
+      }}>
+        <View style={{
+          flex: 1, backgroundColor: 'rgba(0,0,0,0.4)',
+          justifyContent: 'center', alignItems: 'center', padding: 20,
+        }}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={{ width: '100%', maxWidth: 480, maxHeight: '85%' }}
+          >
+            <View style={{
+              backgroundColor: COLORS.white,
+              borderRadius: 20,
+              overflow: 'hidden',
+              maxHeight: '100%',
+            }}>
+              <View style={{
+                flexDirection: 'row', justifyContent: 'space-between',
+                alignItems: 'center', padding: 20,
+                borderBottomWidth: 1, borderBottomColor: COLORS.border,
+              }}>
+                <Text style={{ fontSize: 18, fontWeight: '700', color: COLORS.black }}>
+                  New Workout
+                </Text>
+                <TouchableOpacity onPress={() => setShowAdd(false)}>
+                  <Ionicons name="close" size={24} color={COLORS.black} />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView
+                contentContainerStyle={{ padding: 20 }}
+                keyboardShouldPersistTaps="handled"
+              >
+                <Text style={styles.inputLabel}>Routine Name</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g Upper Body Day"
+                  placeholderTextColor={COLORS.placeholderText}
+                  value={newTitle}
+                  onChangeText={setNewTitle}
+                />
+
+                <Text style={styles.inputLabel}>Exercise name</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g Bench Press"
+                  placeholderTextColor={COLORS.placeholderText}
+                  value={newExercise}
+                  onChangeText={setNewExercise}
+                />
+
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.inputLabel}>Sets</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="3"
+                      placeholderTextColor={COLORS.placeholderText}
+                      value={newSets}
+                      onChangeText={setNewSets}
+                      keyboardType="numeric"
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.inputLabel}>Reps</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="10"
+                      placeholderTextColor={COLORS.placeholderText}
+                      value={newReps}
+                      onChangeText={setNewReps}
+                      keyboardType="numeric"
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.inputLabel}>Weight (kg)</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="60"
+                      placeholderTextColor={COLORS.placeholderText}
+                      value={newWeight}
+                      onChangeText={setNewWeight}
+                      keyboardType="numeric"
+                    />
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.saveBtn, saving && { opacity: 0.6 }]}
+                  onPress={saveWorkout}
+                  disabled={saving}
+                >
+                  <Text style={styles.saveText}>{saving ? 'Saving...' : 'Save Workout'}</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </View>
+      )}
     </View>
   );
 }
