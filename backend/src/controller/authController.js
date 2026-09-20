@@ -163,8 +163,14 @@ export const forgotPassword = async (req, res) => {
     res.status(200).json({
       message: "Reset code sent to your email.",
     });
-  } catch (error) {
-    console.log("Error in forgotPassword", error);
+  } catch (error) { 
+    console.log("FORGOT PASSWORD ERROR");
+    console.log("name:", error.name);
+    console.log("message:", error.message);
+    console.log("code:", error.code);
+    console.log("command:", error.command); 
+   
+   
     res.status(500).json({ message: "Internal server error" });
   }
 };
