@@ -72,13 +72,25 @@ const styles = StyleSheet.create({
     height: 52,
     justifyContent: "center",
     alignItems: "center",
-    marginTop: 8,
     shadowColor: COLORS.button,
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.2,
     shadowRadius: 6,
     elevation: 3,
   },
+
+  forgotPasswordContainer: {
+    alignSelf: "center",
+    marginTop: 10,
+    paddingVertical: 4,
+  },
+  forgotPasswordText: {
+    color: COLORS.button,
+    fontSize: 14,
+    fontWeight: "600",
+    fontFamily: "GeneralSans-Variable",
+  },
+
   buttonText: {
     fontFamily: "GeneralSans-Variable",
     color: COLORS.white,
