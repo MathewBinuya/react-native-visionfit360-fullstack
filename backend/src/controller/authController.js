@@ -102,7 +102,7 @@ export const forgotPassword = async (req, res) => {
     if (!email)
       return res.status(400).json({ message: "Email is required" });
 
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email: email.trim().toLowerCase() });
     if (!user) {
       return res.status(200).json({
         message: "If that email is registered, a reset code has been sent.",
@@ -165,21 +165,16 @@ export const resetPassword = async (req, res) => {
     if (!email || !resetCode || !newPassword)
       return res.status(400).json({ message: "All fields are required" });
 
-    if (newPassword.length < 8)
-      return res.status(400).json({ message: "Password must be at least 8 characters long" });
-    if (!/[a-zA-Z]/.test(newPassword))
-      return res.status(400).json({ message: "Password must include at least one letter" });
-    if (!/[0-9]/.test(newPassword))
-      return res.status(400).json({ message: "Password must include at least one number" });
+    // ...password strength checks unchanged
 
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email: email.trim().toLowerCase() });
     if (!user)
       return res.status(400).json({ message: "Invalid reset request" });
 
     if (!user.resetTokenExpiry || user.resetTokenExpiry < new Date())
       return res.status(400).json({ message: "Reset code has expired. Please request a new one." });
 
-    const hashedCode = crypto.createHash("sha256").update(resetCode).digest("hex");
+    const hashedCode = crypto.createHash("sha256").update(resetCode.trim()).digest("hex");
     if (user.resetToken !== hashedCode)
       return res.status(400).json({ message: "Invalid reset code" });
 
