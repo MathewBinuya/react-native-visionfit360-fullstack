@@ -70,7 +70,6 @@ export const login = async (req, res) => {
 
     const token = generateToken(user._id);
 
-    // save token to DB — invalidates any previous sessions (single-session enforcement)
     user.currentToken = token;
     await user.save();
 
@@ -92,15 +91,9 @@ export const login = async (req, res) => {
 };
 
 // ── FORGOT PASSWORD ──────────────────────────────────────────────────────────
-// Step 1: user submits their email → backend generates a 6-digit reset code
-// Step 2: user submits email + reset code + new password → backend verifies and resets
-//
-// NOTE: since we have no email service, the reset code is returned in the response.
-// In a production app, you'd email it instead. For the capstone, the mobile app
-// shows it to the user directly so they can use it in step 2.
+// Sends the reset code via Resend's HTTP API (port 443) instead of SMTP,
+// since Render's free tier blocks outbound SMTP ports (25/465/587).
 // ─────────────────────────────────────────────────────────────────────────────
-
-
 
 export const forgotPassword = async (req, res) => {
   try {
@@ -111,51 +104,59 @@ export const forgotPassword = async (req, res) => {
 
     const user = await User.findOne({ email });
     if (!user) {
-      // security: don't reveal if email exists
       return res.status(200).json({
         message: "If that email is registered, a reset code has been sent.",
       });
     }
 
-    // generate 6-digit code, valid 15 minutes
     const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
     const expiry = new Date(Date.now() + 15 * 60 * 1000);
 
-    // store hashed code in DB
     user.resetToken = crypto.createHash("sha256").update(resetCode).digest("hex");
     user.resetTokenExpiry = expiry;
     await user.save();
 
+    console.log("Sending reset email to:", user.email);
 
-    // send email
-    await transporter.sendMail({
-      from: `"VisionFIT360" <${process.env.GMAIL_USER}>`,
-      to: user.email,
-      subject: "VisionFIT360 — Your Password Reset Code",
-      html: `
-        <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 32px; background: #f7f7f7; border-radius: 12px;">
-          <h2 style="color: #111111; margin-bottom: 8px;">Password Reset</h2>
-          <p style="color: #555; margin-bottom: 24px;">You requested a password reset for your VisionFIT360 account.</p>
-          <div style="background: #ffffff; border-radius: 10px; padding: 24px; text-align: center; margin-bottom: 24px;">
-            <p style="color: #888; font-size: 13px; margin-bottom: 8px;">YOUR RESET CODE</p>
-            <p style="font-size: 36px; font-weight: 900; letter-spacing: 8px; color: #111111; margin: 0;">${resetCode}</p>
+    const emailRes = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: "VisionFIT360 <onboarding@resend.dev>",
+        to: user.email,
+        subject: "VisionFIT360 — Your Password Reset Code",
+        html: `
+          <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 32px; background: #f7f7f7; border-radius: 12px;">
+            <h2 style="color: #111111; margin-bottom: 8px;">Password Reset</h2>
+            <p style="color: #555; margin-bottom: 24px;">You requested a password reset for your VisionFIT360 account.</p>
+            <div style="background: #ffffff; border-radius: 10px; padding: 24px; text-align: center; margin-bottom: 24px;">
+              <p style="color: #888; font-size: 13px; margin-bottom: 8px;">YOUR RESET CODE</p>
+              <p style="font-size: 36px; font-weight: 900; letter-spacing: 8px; color: #111111; margin: 0;">${resetCode}</p>
+            </div>
+            <p style="color: #888; font-size: 13px; text-align: center;">This code expires in <strong>15 minutes</strong>.</p>
+            <p style="color: #bbb; font-size: 12px; text-align: center; margin-top: 24px;">If you didn't request this, you can safely ignore this email.</p>
           </div>
-          <p style="color: #888; font-size: 13px; text-align: center;">This code expires in <strong>15 minutes</strong>.</p>
-          <p style="color: #bbb; font-size: 12px; text-align: center; margin-top: 24px;">If you didn't request this, you can safely ignore this email.</p>
-        </div>
-      `,
+        `,
+      }),
     });
+
+    if (!emailRes.ok) {
+      const errBody = await emailRes.json().catch(() => ({}));
+      console.log("RESEND ERROR:", emailRes.status, errBody);
+      return res.status(500).json({ message: "Internal server error" });
+    }
 
     res.status(200).json({
       message: "Reset code sent to your email.",
     });
-  } catch (error) { 
-    console.log("Error in forgotPassword:", error.message); 
-    console.log("Full error:", JSON.stringify(error, null, 2)); 
+  } catch (error) {
+    console.log("Error in forgotPassword:", error.message);
     res.status(500).json({ message: "Internal server error" });
   }
 };
-
 
 export const resetPassword = async (req, res) => {
   try {
@@ -164,7 +165,6 @@ export const resetPassword = async (req, res) => {
     if (!email || !resetCode || !newPassword)
       return res.status(400).json({ message: "All fields are required" });
 
-    // password strength on the new password
     if (newPassword.length < 8)
       return res.status(400).json({ message: "Password must be at least 8 characters long" });
     if (!/[a-zA-Z]/.test(newPassword))
@@ -176,20 +176,17 @@ export const resetPassword = async (req, res) => {
     if (!user)
       return res.status(400).json({ message: "Invalid reset request" });
 
-    // check token not expired
     if (!user.resetTokenExpiry || user.resetTokenExpiry < new Date())
       return res.status(400).json({ message: "Reset code has expired. Please request a new one." });
 
-    // verify the code matches (compare hash)
     const hashedCode = crypto.createHash("sha256").update(resetCode).digest("hex");
     if (user.resetToken !== hashedCode)
       return res.status(400).json({ message: "Invalid reset code" });
 
-    // all good — update password and clear the reset token
     user.password = newPassword;
     user.resetToken = "";
     user.resetTokenExpiry = null;
-    user.currentToken = ""; // force re-login on all devices after password reset
+    user.currentToken = "";
     await user.save();
 
     res.status(200).json({ message: "Password reset successfully. Please log in with your new password." });
