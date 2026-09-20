@@ -3,45 +3,21 @@ import bcrypt from "bcryptjs";
 
 const userSchema = new mongoose.Schema(
   {
-    username: { 
-      type: String, 
-      required: true, 
-      unique: true 
-    },
-    email: { 
-      type: String, 
-      required: 
-      true,
-       unique: true
-     },
-    password: { 
-      type: String, 
-      required: true, 
-      minlength: 6 
-    },
-    onBoardingComplete: { 
-      type: Boolean, 
-      default: false 
-    },
-    name: { 
-      type: String, 
-      default: "" 
-    },
-    photo: { 
-      type: String,
-      default: "" 
-    },
-    bio: { 
-      type: String,
-      default: "" 
-    },
+    username: { type: String, required: true, unique: true },
+    email: { type: String, required: true, unique: true },
+    password: { type: String, required: true, minlength: 6 },
+    onBoardingComplete: { type: Boolean, default: false },
+    name: { type: String, default: "" },
+    photo: { type: String, default: "" },
+    bio: { type: String, default: "" },
     dateOfBirth: Date,
-    gender: { 
-      type: String, 
-      enum: ["male", "female", "other"] 
-    },
+    gender: { type: String, enum: ["male", "female", "other"] },
     heightCm: Number,
     weightKg: Number,
+    currentToken: { type: String, default: "" },
+    // forgot password fields
+    resetToken: { type: String, default: "" },
+    resetTokenExpiry: { type: Date, default: null },
   },
   { timestamps: true }
 );
