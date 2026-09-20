@@ -134,6 +134,13 @@ export const forgotPassword = async (req, res) => {
     user.resetTokenExpiry = expiry;
     await user.save();
 
+    console.log("GMAIL_USER loaded:", !!process.env.GMAIL_USER);
+    console.log("GMAIL_PASS loaded:", !!process.env.GMAIL_PASS);
+    console.log("Sending reset email to:", user.email);
+
+
+
+
     // send email
     await transporter.sendMail({
       from: `"VisionFIT360" <${process.env.GMAIL_USER}>`,
