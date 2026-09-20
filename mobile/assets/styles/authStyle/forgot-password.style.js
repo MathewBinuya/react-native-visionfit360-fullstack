@@ -22,4 +22,5 @@ const styles = StyleSheet.create({
   hint: { fontSize: 12, color: COLORS.gray, marginTop: 8, lineHeight: 18, fontFamily: 'GeneralSans-Variable' },
 });
 
+
 export default styles;

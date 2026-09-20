@@ -37,8 +37,6 @@ export default function ForgotPassword() {
         [{ text: "Got it", onPress: () => setStep(2) }]
       );
         
-        
-  
   
     } catch (error) {
       Alert.alert("Error", error.message || "Failed to send reset code");
