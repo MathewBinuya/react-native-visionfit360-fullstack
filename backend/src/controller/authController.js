@@ -1,6 +1,5 @@
 import User from "../models/user.model.js";
 import generateToken from "../utils/generateToken.js";
-import nodemailer from "nodemailer";
 import crypto from "crypto";
 
 export const register = async (req, res) => {
@@ -101,24 +100,10 @@ export const login = async (req, res) => {
 // shows it to the user directly so they can use it in step 2.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_PASS,
-  },
-});
 
 
 export const forgotPassword = async (req, res) => {
   try {
-
-       // TEMP DEBUG — remove after fixing
-    console.log("GMAIL_USER:", process.env.GMAIL_USER ? "SET" : "MISSING");
-    console.log("GMAIL_PASS:", process.env.GMAIL_PASS ? "SET" : "MISSING");
-
-
-
     const { email } = req.body;
 
     if (!email)
@@ -140,12 +125,6 @@ export const forgotPassword = async (req, res) => {
     user.resetToken = crypto.createHash("sha256").update(resetCode).digest("hex");
     user.resetTokenExpiry = expiry;
     await user.save();
-
-    console.log("GMAIL_USER loaded:", !!process.env.GMAIL_USER);
-    console.log("GMAIL_PASS loaded:", !!process.env.GMAIL_PASS);
-    console.log("Sending reset email to:", user.email);
-
-
 
 
     // send email
@@ -171,8 +150,8 @@ export const forgotPassword = async (req, res) => {
       message: "Reset code sent to your email.",
     });
   } catch (error) { 
-    console.log("Error in forgotPassword:", error.message); // ← add .message
-    console.log("Full error:", JSON.stringify(error, null, 2)); // ← add this
+    console.log("Error in forgotPassword:", error.message); 
+    console.log("Full error:", JSON.stringify(error, null, 2)); 
     res.status(500).json({ message: "Internal server error" });
   }
 };
