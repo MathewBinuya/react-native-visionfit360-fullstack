@@ -112,6 +112,13 @@ const transporter = nodemailer.createTransport({
 
 export const forgotPassword = async (req, res) => {
   try {
+
+       // TEMP DEBUG — remove after fixing
+    console.log("GMAIL_USER:", process.env.GMAIL_USER ? "SET" : "MISSING");
+    console.log("GMAIL_PASS:", process.env.GMAIL_PASS ? "SET" : "MISSING");
+
+
+
     const { email } = req.body;
 
     if (!email)
@@ -169,8 +176,6 @@ export const forgotPassword = async (req, res) => {
     console.log("message:", error.message);
     console.log("code:", error.code);
     console.log("command:", error.command); 
-   
-   
     res.status(500).json({ message: "Internal server error" });
   }
 };
