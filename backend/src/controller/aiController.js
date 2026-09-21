@@ -2,7 +2,7 @@ import { model } from "../lib/gemini.js";
 import User from "../models/user.model.js";
 import Workout from "../models/workout.model.js";
 
-// --- helper: call Gemini with automatic retry on rate limit (429) ---
+//  helper - call Gemini with automatic retry on rate limit (429) 
 const generateWithRetry = async (payload, maxRetries = 3) => {
   let lastErr;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {

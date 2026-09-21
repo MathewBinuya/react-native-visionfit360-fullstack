@@ -10,7 +10,7 @@ const adminProtect = async (req, res, next) => {
     const token = header.split(" ")[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // admin tokens carry role: "admin"
+    // admin tokens carry role "admin"
     if (decoded.role !== "admin") {
       return res.status(403).json({ message: "Admin access required" });
     }

@@ -7,7 +7,7 @@ import Exercise from "../models/exercise.model.js";
 const generateAdminToken = (id) =>
   jwt.sign({ id, role: "admin" }, process.env.JWT_SECRET, { expiresIn: "7d" });
 
-// --- AUTH ---
+//  AUTH 
 export const adminLogin = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -26,7 +26,7 @@ export const adminLogin = async (req, res) => {
   }
 };
 
-// --- ANALYTICS ---
+//  ANALYTICS
 export const getStats = async (req, res) => {
   try {
     const totalUsers = await User.countDocuments();
@@ -48,7 +48,7 @@ export const getStats = async (req, res) => {
   }
 };
 
-// --- USER MANAGEMENT ---
+//  USER MANAGEMENT 
 export const getUsers = async (req, res) => {
   try {
     const users = await User.find().select("-password").sort({ createdAt: -1 });
@@ -80,7 +80,7 @@ export const deleteUser = async (req, res) => {
   }
 };
 
-// --- EXERCISE / CONTENT MANAGEMENT ---
+//  EXERCISE / CONTENT MANAGEMENT 
 export const getExercises = async (req, res) => {
   try {
     const exercises = await Exercise.find().sort({ createdAt: 1 });

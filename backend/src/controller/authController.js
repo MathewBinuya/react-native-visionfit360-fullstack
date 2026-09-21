@@ -1,5 +1,6 @@
 import User from "../models/user.model.js";
 import generateToken from "../utils/generateToken.js";
+import nodemailer from "nodemailer";
 import crypto from "crypto";
 
 export const register = async (req, res) => {
@@ -91,9 +92,19 @@ export const login = async (req, res) => {
 };
 
 // ── FORGOT PASSWORD ──────────────────────────────────────────────────────────
-// Sends the reset code via Resend's HTTP API (port 443) instead of SMTP,
-// since Render's free tier blocks outbound SMTP ports (25/465/587).
+// Uses Gmail SMTP directly. Requires a paid Render instance (Starter or above) —
+// Render's free tier blocks outbound SMTP ports (25/465/587).
+// GMAIL_PASS must be a Gmail App Password (16 chars, no spaces) — not your
+// regular Gmail login password.
 // ─────────────────────────────────────────────────────────────────────────────
+
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.GMAIL_USER,
+    pass: process.env.GMAIL_PASS,
+  },
+});
 
 export const forgotPassword = async (req, res) => {
   try {
@@ -118,36 +129,23 @@ export const forgotPassword = async (req, res) => {
 
     console.log("Sending reset email to:", user.email);
 
-    const emailRes = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: "VisionFIT360 <onboarding@resend.dev>",
-        to: user.email,
-        subject: "VisionFIT360 — Your Password Reset Code",
-        html: `
-          <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 32px; background: #f7f7f7; border-radius: 12px;">
-            <h2 style="color: #111111; margin-bottom: 8px;">Password Reset</h2>
-            <p style="color: #555; margin-bottom: 24px;">You requested a password reset for your VisionFIT360 account.</p>
-            <div style="background: #ffffff; border-radius: 10px; padding: 24px; text-align: center; margin-bottom: 24px;">
-              <p style="color: #888; font-size: 13px; margin-bottom: 8px;">YOUR RESET CODE</p>
-              <p style="font-size: 36px; font-weight: 900; letter-spacing: 8px; color: #111111; margin: 0;">${resetCode}</p>
-            </div>
-            <p style="color: #888; font-size: 13px; text-align: center;">This code expires in <strong>15 minutes</strong>.</p>
-            <p style="color: #bbb; font-size: 12px; text-align: center; margin-top: 24px;">If you didn't request this, you can safely ignore this email.</p>
+    await transporter.sendMail({
+      from: `"VisionFIT360" <${process.env.GMAIL_USER}>`,
+      to: user.email,
+      subject: "VisionFIT360 — Your Password Reset Code",
+      html: `
+        <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 32px; background: #f7f7f7; border-radius: 12px;">
+          <h2 style="color: #111111; margin-bottom: 8px;">Password Reset</h2>
+          <p style="color: #555; margin-bottom: 24px;">You requested a password reset for your VisionFIT360 account.</p>
+          <div style="background: #ffffff; border-radius: 10px; padding: 24px; text-align: center; margin-bottom: 24px;">
+            <p style="color: #888; font-size: 13px; margin-bottom: 8px;">YOUR RESET CODE</p>
+            <p style="font-size: 36px; font-weight: 900; letter-spacing: 8px; color: #111111; margin: 0;">${resetCode}</p>
           </div>
-        `,
-      }),
+          <p style="color: #888; font-size: 13px; text-align: center;">This code expires in <strong>15 minutes</strong>.</p>
+          <p style="color: #bbb; font-size: 12px; text-align: center; margin-top: 24px;">If you didn't request this, you can safely ignore this email.</p>
+        </div>
+      `,
     });
-
-    if (!emailRes.ok) {
-      const errBody = await emailRes.json().catch(() => ({}));
-      console.log("RESEND ERROR:", emailRes.status, errBody);
-      return res.status(500).json({ message: "Internal server error" });
-    }
 
     res.status(200).json({
       message: "Reset code sent to your email.",
@@ -165,7 +163,12 @@ export const resetPassword = async (req, res) => {
     if (!email || !resetCode || !newPassword)
       return res.status(400).json({ message: "All fields are required" });
 
-    // ...password strength checks unchanged
+    if (newPassword.length < 8)
+      return res.status(400).json({ message: "Password must be at least 8 characters long" });
+    if (!/[a-zA-Z]/.test(newPassword))
+      return res.status(400).json({ message: "Password must include at least one letter" });
+    if (!/[0-9]/.test(newPassword))
+      return res.status(400).json({ message: "Password must include at least one number" });
 
     const user = await User.findOne({ email: email.trim().toLowerCase() });
     if (!user)
