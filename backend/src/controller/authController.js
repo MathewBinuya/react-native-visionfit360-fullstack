@@ -48,14 +48,30 @@ export const register = async (req, res) => {
       return res.status(400).json({ message: "Please enter a valid email address" });
 
     const existingEmail = await User.findOne({ email: email.trim().toLowerCase() });
-    if (existingEmail)
+
+    // only block if that email belongs to an already-verified account
+    if (existingEmail && existingEmail.isVerified) {
       return res.status(400).json({ message: "Email already exists" });
+    }
 
     const existingUsername = await User.findOne({ username });
-    if (existingUsername)
+    // block on username collision, unless it's literally the same unverified record we're about to reuse
+    if (
+      existingUsername &&
+      (!existingEmail || existingUsername._id.toString() !== existingEmail._id.toString())
+    ) {
       return res.status(400).json({ message: "Username already exists" });
+    }
 
-    const user = new User({ email: email.trim().toLowerCase(), username, password });
+    let user;
+    if (existingEmail) {
+      // stale unverified account from a previous incomplete signup — reuse it
+      existingEmail.username = username;
+      existingEmail.password = password; // pre-save hook re-hashes since password is modified
+      user = existingEmail;
+    } else {
+      user = new User({ email: email.trim().toLowerCase(), username, password });
+    }
 
     const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
     user.verificationCode = crypto.createHash("sha256").update(verificationCode).digest("hex");
