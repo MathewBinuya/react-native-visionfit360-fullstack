@@ -58,7 +58,7 @@ const handleSignUp = async () => {
       Alert.alert("Error", result.error);
       return;
   } 
-  router.replace("/(onBoarding)/profile");
+  router.replace({ pathname: "./verify-email", params: { email } });
 };
 
   return (

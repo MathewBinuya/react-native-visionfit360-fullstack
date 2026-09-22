@@ -28,6 +28,34 @@ export const useAuthStore = create((set) => ({
 
       if (!response.ok) throw new Error(data.message || "Something went wrong");
 
+      // no token/user yet — account isn't verified until verifyEmail succeeds
+      set({ isLoading: false });
+
+      return { success: true };
+    } catch (error) {
+      set({ isLoading: false });
+      return { success: false, error: error.message };
+    }
+  },
+
+  verifyEmail: async (email, verificationCode) => {
+    set({ isLoading: true });
+    try {
+      const response = await fetch(`${API_URL}/auth/verify-email`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email,
+          verificationCode,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) throw new Error(data.message || "Something went wrong");
+
       await AsyncStorage.setItem("user", JSON.stringify(data.user));
       await AsyncStorage.setItem("token", data.token);
 
@@ -36,6 +64,26 @@ export const useAuthStore = create((set) => ({
       return { success: true };
     } catch (error) {
       set({ isLoading: false });
+      return { success: false, error: error.message };
+    }
+  },
+
+  resendVerificationCode: async (email) => {
+    try {
+      const response = await fetch(`${API_URL}/auth/resend-verification`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) throw new Error(data.message || "Something went wrong");
+
+      return { success: true };
+    } catch (error) {
       return { success: false, error: error.message };
     }
   },

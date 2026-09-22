@@ -1,4 +1,4 @@
-import { View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator, StyleSheet } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator } from 'react-native'
 import { useState } from 'react'
 import { router } from 'expo-router'
 import { Ionicons } from "@expo/vector-icons"
@@ -32,7 +32,7 @@ export default function ForgotPassword() {
       if (!res.ok) throw new Error(data.message || "Something went wrong");
         // replace the if (data.resetCode) block with this:
       Alert.alert(
-        "Code Sent! 📧",
+        "Code Sent!",
         "A reset code has been sent to your email. Check your inbox.",
         [{ text: "Got it", onPress: () => setStep(2) }]
       );
@@ -61,7 +61,7 @@ export default function ForgotPassword() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Something went wrong");
-      Alert.alert("Password Reset! ✓", "Your password has been updated. Please log in.", [{ text: "Log in", onPress: () => router.replace("/(auth)") }]);
+      Alert.alert("Password Reset", "Your password has been updated. Please log in.", [{ text: "Log in", onPress: () => router.replace("/(auth)") }]);
     } catch (error) {
       Alert.alert("Error", error.message || "Failed to reset password");
     } finally {

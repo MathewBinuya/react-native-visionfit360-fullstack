@@ -86,7 +86,7 @@ const styles = StyleSheet.create({
   },
   forgotPasswordText: {
     color: COLORS.button,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "600",
     fontFamily: "GeneralSans-Variable",
   },
