@@ -18,7 +18,11 @@ const userSchema = new mongoose.Schema(
     // forgot password fields
     resetToken: { type: String, default: "" },
     resetTokenExpiry: { type: Date, default: null },
+    isVerified: { type: Boolean, default: false },
+    verificationCode: { type: String, default: "" },
+    verificationCodeExpiry: { type: Date, default: null },
   },
+  
   { timestamps: true }
 );
 
