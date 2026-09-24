@@ -1,3 +1,4 @@
+import { SchemaType } from "@google/generative-ai";
 import { model } from "../lib/gemini.js";
 import User from "../models/user.model.js";
 import Workout from "../models/workout.model.js";
@@ -66,24 +67,24 @@ const buildUserContext = async (userId) => {
 // schema Gemini must follow — matches the Workout model's exercises/sets shape exactly,
 // so the response can be POSTed straight to /workouts with zero parsing
 const workoutRecommendationSchema = {
-  type: "object",
+  type: SchemaType.OBJECT,
   properties: {
-    intro: { type: "string", description: "A short, friendly one-line intro to the workout" },
-    title: { type: "string", description: "A short workout title, e.g. 'Upper Body Day'" },
+    intro: { type: SchemaType.STRING, description: "A short, friendly one-line intro to the workout" },
+    title: { type: SchemaType.STRING, description: "A short workout title, e.g. 'Upper Body Day'" },
     exercises: {
-      type: "array",
+      type: SchemaType.ARRAY,
       items: {
-        type: "object",
+        type: SchemaType.OBJECT,
         properties: {
-          name: { type: "string" },
+          name: { type: SchemaType.STRING },
           sets: {
-            type: "array",
+            type: SchemaType.ARRAY,
             items: {
-              type: "object",
+              type: SchemaType.OBJECT,
               properties: {
-                reps: { type: "number" },
-                weightKg: { type: "number", description: "0 for bodyweight exercises" },
-                restSeconds: { type: "number" },
+                reps: { type: SchemaType.NUMBER },
+                weightKg: { type: SchemaType.NUMBER, description: "0 for bodyweight exercises" },
+                restSeconds: { type: SchemaType.NUMBER },
               },
               required: ["reps", "weightKg", "restSeconds"],
             },
