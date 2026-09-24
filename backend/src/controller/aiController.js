@@ -19,20 +19,17 @@ const generateWithRetry = async (contents, generationConfig, maxRetries = 3) => 
         msg.includes("quota") ||
         msg.includes("resource has been exhausted");
 
-      // only retry on rate-limit errors, and not after the last attempt
       if (isRateLimit && attempt < maxRetries) {
-        // exponential backoff: wait longer each time (1s, 2s, 4s)
         const waitMs = 1000 * Math.pow(2, attempt);
         await new Promise((r) => setTimeout(r, waitMs));
         continue;
       }
-      throw err; // not a rate limit, or out of retries
+      throw err;
     }
   }
   throw lastErr;
 };
 
-// detect rate-limit errors so we can return a friendly message
 const isRateLimitError = (err) => {
   const msg = (err?.message || "").toLowerCase();
   return (
@@ -43,7 +40,6 @@ const isRateLimitError = (err) => {
   );
 };
 
-// build a short context string about the user
 const buildUserContext = async (userId) => {
   const user = await User.findById(userId).select("-password");
   const recent = await Workout.find({ user: userId, completed: true })
@@ -64,8 +60,6 @@ const buildUserContext = async (userId) => {
   return `User profile: ${bmiLine}. Gender: ${user?.gender || "unspecified"}. Recent workouts: ${recentLine}.`;
 };
 
-// schema Gemini must follow — matches the Workout model's exercises/sets shape exactly,
-// so the response can be POSTed straight to /workouts with zero parsing
 const workoutRecommendationSchema = {
   type: SchemaType.OBJECT,
   properties: {
@@ -97,7 +91,6 @@ const workoutRecommendationSchema = {
   required: ["intro", "title", "exercises"],
 };
 
-// ai recommend workout recommendation
 export const recommendWorkout = async (req, res) => {
   try {
     const context = await buildUserContext(req.user.id);
@@ -130,19 +123,62 @@ Recommend a single workout for today suited to this person. Keep the intro short
   }
 };
 
-//  chat with context history
+// schema for chat — covers BOTH a normal conversational reply and a workout
+// recommendation given mid-chat, so "give me a leg day" becomes trackable too
+const chatResponseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    responseType: {
+      type: SchemaType.STRING,
+      enum: ["chat", "workout"],
+      description: "\"workout\" if the user is asking for a workout, routine, or exercise plan. \"chat\" for anything else.",
+    },
+    reply: {
+      type: SchemaType.STRING,
+      description: "Always include this. For \"chat\", the full answer. For \"workout\", a short one-sentence friendly intro.",
+    },
+    title: {
+      type: SchemaType.STRING,
+      description: "Workout title — only when responseType is \"workout\"",
+    },
+    exercises: {
+      type: SchemaType.ARRAY,
+      description: "Only when responseType is \"workout\" — omit for \"chat\"",
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          name: { type: SchemaType.STRING },
+          sets: {
+            type: SchemaType.ARRAY,
+            items: {
+              type: SchemaType.OBJECT,
+              properties: {
+                reps: { type: SchemaType.NUMBER },
+                weightKg: { type: SchemaType.NUMBER, description: "0 for bodyweight exercises" },
+                restSeconds: { type: SchemaType.NUMBER },
+              },
+              required: ["reps", "weightKg", "restSeconds"],
+            },
+          },
+        },
+        required: ["name", "sets"],
+      },
+    },
+  },
+  required: ["responseType", "reply"],
+};
+
 export const chatWithCoach = async (req, res) => {
   try {
     const { messages } = req.body;
     const context = await buildUserContext(req.user.id);
 
-    // only keep the last 10 messages to reduce tokens/load
     const trimmed = Array.isArray(messages) ? messages.slice(-10) : [];
 
     const history = [
       {
         role: "user",
-        parts: [{ text: `You are a friendly fitness coach for a workout app. ${context} Answer the user's fitness questions concisely and practically. Keep responses short.` }],
+        parts: [{ text: `You are a friendly fitness coach for a workout app. ${context} Answer the user's fitness questions concisely and practically. Keep responses short. If the user asks for a workout, routine, or exercise plan, set responseType to "workout" and provide structured exercises with realistic sets/reps/rest (use 0 weightKg for bodyweight moves). For anything else, set responseType to "chat".` }],
       },
       {
         role: "model",
@@ -154,8 +190,27 @@ export const chatWithCoach = async (req, res) => {
       })),
     ];
 
-    const text = await generateWithRetry(history, undefined);
-    res.json({ reply: text });
+    const raw = await generateWithRetry(
+      history,
+      { responseMimeType: "application/json", responseSchema: chatResponseSchema }
+    );
+
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (parseErr) {
+      console.log("Failed to parse AI chat JSON response:", raw);
+      return res.status(500).json({ message: "Could not get a reply" });
+    }
+
+    if (parsed.responseType === "workout" && parsed.exercises?.length) {
+      return res.json({
+        reply: parsed.reply,
+        workout: { title: parsed.title, exercises: parsed.exercises },
+      });
+    }
+
+    res.json({ reply: parsed.reply });
   } catch (err) {
     console.log("AI chat error", err.message);
     if (isRateLimitError(err)) {
