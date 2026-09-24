@@ -3,11 +3,11 @@ import User from "../models/user.model.js";
 import Workout from "../models/workout.model.js";
 
 //  helper - call Gemini with automatic retry on rate limit (429) 
-const generateWithRetry = async (payload, maxRetries = 3) => {
+const generateWithRetry = async (contents, generationConfig, maxRetries = 3) => {
   let lastErr;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const result = await model.generateContent(payload);
+      const result = await model.generateContent({ contents, generationConfig });
       return result.response.text();
     } catch (err) {
       lastErr = err;
@@ -63,16 +63,61 @@ const buildUserContext = async (userId) => {
   return `User profile: ${bmiLine}. Gender: ${user?.gender || "unspecified"}. Recent workouts: ${recentLine}.`;
 };
 
+// schema Gemini must follow — matches the Workout model's exercises/sets shape exactly,
+// so the response can be POSTed straight to /workouts with zero parsing
+const workoutRecommendationSchema = {
+  type: "object",
+  properties: {
+    intro: { type: "string", description: "A short, friendly one-line intro to the workout" },
+    title: { type: "string", description: "A short workout title, e.g. 'Upper Body Day'" },
+    exercises: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          sets: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                reps: { type: "number" },
+                weightKg: { type: "number", description: "0 for bodyweight exercises" },
+                restSeconds: { type: "number" },
+              },
+              required: ["reps", "weightKg", "restSeconds"],
+            },
+          },
+        },
+        required: ["name", "sets"],
+      },
+    },
+  },
+  required: ["intro", "title", "exercises"],
+};
+
 // ai recommend workout recommendation
 export const recommendWorkout = async (req, res) => {
   try {
     const context = await buildUserContext(req.user.id);
 
     const prompt = `You are a friendly, encouraging fitness coach. ${context}
-Recommend a single workout for today suited to this person. Keep it concise: a short intro line, then 4-6 exercises with sets and reps. Use plain text, no markdown headers. Be motivating but practical.`;
+Recommend a single workout for today suited to this person. Keep the intro short and motivating (one sentence). Include 4-6 exercises with realistic sets, reps, and rest times. Use 0 for weightKg on bodyweight exercises.`;
 
-    const text = await generateWithRetry(prompt);
-    res.json({ recommendation: text });
+    const raw = await generateWithRetry(
+      [{ role: "user", parts: [{ text: prompt }] }],
+      { responseMimeType: "application/json", responseSchema: workoutRecommendationSchema }
+    );
+
+    let recommendation;
+    try {
+      recommendation = JSON.parse(raw);
+    } catch (parseErr) {
+      console.log("Failed to parse AI JSON response:", raw);
+      return res.status(500).json({ message: "Could not generate recommendation. Please try again." });
+    }
+
+    res.json({ recommendation });
   } catch (err) {
     console.log("AI recommend error", err.message);
     if (isRateLimitError(err)) {
@@ -108,7 +153,7 @@ export const chatWithCoach = async (req, res) => {
       })),
     ];
 
-    const text = await generateWithRetry({ contents: history });
+    const text = await generateWithRetry(history, undefined);
     res.json({ reply: text });
   } catch (err) {
     console.log("AI chat error", err.message);
