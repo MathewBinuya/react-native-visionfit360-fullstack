@@ -10,6 +10,11 @@ import COLORS from "../constants/colors"
 import styles from '../assets/styles/workout.style'
 import api from '../lib/axios'
 
+const emptyExercise = () => ({
+  name: '',
+  sets: [{ reps: '', weightKg: '', restSeconds: '60', completed: false }]
+});
+
 export default function Workout() {
   const insets = useSafeAreaInsets();
   const [workouts, setWorkouts] = useState([]);
@@ -18,10 +23,7 @@ export default function Workout() {
   //  ADD WORKOUT MODAL STATE 
   const [showAdd, setShowAdd] = useState(false);
   const [newTitle, setNewTitle] = useState('');
-  const [newExercise, setNewExercise] = useState('');
-  const [newSets, setNewSets] = useState('');
-  const [newReps, setNewReps] = useState('');
-  const [newWeight, setNewWeight] = useState('');
+  const [newExercises, setNewExercises] = useState([emptyExercise()]);
   const [saving, setSaving] = useState(false);
 
   //  THREE DOTS MENU STATE 
@@ -57,6 +59,46 @@ export default function Workout() {
     } finally {
       setLoading(false);
     }
+  };
+
+  //  OPEN ADD MODAL (always starts fresh) 
+  const openAddModal = () => {
+    setNewTitle('');
+    setNewExercises([emptyExercise()]);
+    setShowAdd(true);
+  };
+
+  //  ADD MODAL HELPERS 
+  const updateNewExerciseName = (exIdx, name) => {
+    const updated = [...newExercises];
+    updated[exIdx] = { ...updated[exIdx], name };
+    setNewExercises(updated);
+  };
+
+  const updateNewSet = (exIdx, setIdx, field, value) => {
+    const updated = [...newExercises];
+    updated[exIdx].sets[setIdx] = { ...updated[exIdx].sets[setIdx], [field]: value };
+    setNewExercises(updated);
+  };
+
+  const addSetToNewExercise = (exIdx) => {
+    const updated = [...newExercises];
+    updated[exIdx].sets.push({ reps: '', weightKg: '', restSeconds: '60', completed: false });
+    setNewExercises(updated);
+  };
+
+  const removeNewSet = (exIdx, setIdx) => {
+    const updated = [...newExercises];
+    updated[exIdx].sets = updated[exIdx].sets.filter((_, i) => i !== setIdx);
+    setNewExercises(updated);
+  };
+
+  const addNewExercise = () => {
+    setNewExercises([...newExercises, emptyExercise()]);
+  };
+
+  const removeNewExercise = (exIdx) => {
+    setNewExercises(newExercises.filter((_, i) => i !== exIdx));
   };
 
   //  OPEN EDIT MODAL 
@@ -175,26 +217,31 @@ export default function Workout() {
   //  SAVE NEW WORKOUT 
   const saveWorkout = async () => {
     if (!newTitle.trim()) { Alert.alert("Missing", "Please enter a workout title"); return; }
+
+    const validExercises = newExercises.filter(ex => ex.name.trim());
+    if (validExercises.length === 0) {
+      Alert.alert("Missing", "Please add at least one exercise");
+      return;
+    }
+
     setSaving(true);
     try {
       const payload = {
         title: newTitle.trim(),
         date: new Date().toISOString(),
-        exercises: newExercise.trim() ? [{
-          name: newExercise.trim(),
-          sets: [{
-            reps: Number(newReps) || 0,
-            weightKg: Number(newWeight) || 0,
-            restSeconds: 60,
+        exercises: validExercises.map(ex => ({
+          name: ex.name.trim(),
+          sets: ex.sets.map(s => ({
+            reps: Number(s.reps) || 0,
+            weightKg: Number(s.weightKg) || 0,
+            restSeconds: Number(s.restSeconds) || 60,
             completed: false,
-          }]
-        }] : [],
+          }))
+        })),
       };
       const res = await api.post("/workouts", payload);
       setWorkouts(prev => [res.data, ...prev]);
       setShowAdd(false);
-      setNewTitle(''); setNewExercise('');
-      setNewSets(''); setNewReps(''); setNewWeight('');
     } catch (error) {
       Alert.alert("Error", error.response?.data?.message || "Failed to save");
     } finally {
@@ -210,7 +257,7 @@ export default function Workout() {
           <Ionicons name="arrow-back" size={24} color={COLORS.black} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Workouts</Text>
-        <TouchableOpacity onPress={() => setShowAdd(true)}>
+        <TouchableOpacity onPress={openAddModal}>
           <Ionicons name="add" size={28} color={COLORS.black} />
         </TouchableOpacity>
       </View>
@@ -535,57 +582,102 @@ export default function Workout() {
               >
                 <Text style={styles.inputLabel}>Routine Name</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, { marginBottom: 20 }]}
                   placeholder="e.g Upper Body Day"
                   placeholderTextColor={COLORS.placeholderText}
                   value={newTitle}
                   onChangeText={setNewTitle}
                 />
 
-                <Text style={styles.inputLabel}>Exercise name</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="e.g Bench Press"
-                  placeholderTextColor={COLORS.placeholderText}
-                  value={newExercise}
-                  onChangeText={setNewExercise}
-                />
+                {/* exercises */}
+                {newExercises.map((ex, exIdx) => (
+                  <View key={exIdx} style={{
+                    borderWidth: 1, borderColor: COLORS.border, borderRadius: 12,
+                    padding: 14, marginBottom: 16, backgroundColor: COLORS.inputBackground,
+                  }}>
+                    {/* exercise name + remove */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                      <TextInput
+                        style={{
+                          flex: 1, borderWidth: 1, borderColor: COLORS.border, borderRadius: 8,
+                          padding: 10, fontSize: 14, color: COLORS.black, backgroundColor: COLORS.white,
+                        }}
+                        value={ex.name}
+                        onChangeText={(t) => updateNewExerciseName(exIdx, t)}
+                        placeholder="Exercise name"
+                        placeholderTextColor={COLORS.placeholderText}
+                      />
+                      <TouchableOpacity onPress={() => removeNewExercise(exIdx)} hitSlop={8}>
+                        <Ionicons name="close-circle" size={22} color="#E24B4A" />
+                      </TouchableOpacity>
+                    </View>
 
-                <View style={{ flexDirection: 'row', gap: 10 }}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.inputLabel}>Sets</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="3"
-                      placeholderTextColor={COLORS.placeholderText}
-                      value={newSets}
-                      onChangeText={setNewSets}
-                      keyboardType="numeric"
-                    />
+                    {/* sets */}
+                    {ex.sets.map((s, setIdx) => (
+                      <View key={setIdx} style={{
+                        flexDirection: 'row', gap: 8, marginBottom: 8, alignItems: 'center',
+                      }}>
+                        <Text style={{ fontSize: 12, color: COLORS.gray, width: 36 }}>
+                          Set {setIdx + 1}
+                        </Text>
+                        <TextInput
+                          style={{
+                            flex: 1, borderWidth: 1, borderColor: COLORS.border, borderRadius: 8,
+                            padding: 8, fontSize: 13, color: COLORS.black,
+                            backgroundColor: COLORS.white, textAlign: 'center',
+                          }}
+                          value={s.reps}
+                          onChangeText={(t) => updateNewSet(exIdx, setIdx, 'reps', t)}
+                          placeholder="Reps"
+                          placeholderTextColor={COLORS.placeholderText}
+                          keyboardType="numeric"
+                        />
+                        <TextInput
+                          style={{
+                            flex: 1, borderWidth: 1, borderColor: COLORS.border, borderRadius: 8,
+                            padding: 8, fontSize: 13, color: COLORS.black,
+                            backgroundColor: COLORS.white, textAlign: 'center',
+                          }}
+                          value={s.weightKg}
+                          onChangeText={(t) => updateNewSet(exIdx, setIdx, 'weightKg', t)}
+                          placeholder="kg"
+                          placeholderTextColor={COLORS.placeholderText}
+                          keyboardType="numeric"
+                        />
+                        <TouchableOpacity onPress={() => removeNewSet(exIdx, setIdx)} hitSlop={8}>
+                          <Ionicons name="remove-circle-outline" size={20} color={COLORS.gray} />
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+
+                    {/* add set */}
+                    <TouchableOpacity
+                      onPress={() => addSetToNewExercise(exIdx)}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}
+                    >
+                      <Ionicons name="add-circle-outline" size={18} color={COLORS.button} />
+                      <Text style={{ fontSize: 13, color: COLORS.button, fontWeight: '600' }}>
+                        Add set
+                      </Text>
+                    </TouchableOpacity>
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.inputLabel}>Reps</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="10"
-                      placeholderTextColor={COLORS.placeholderText}
-                      value={newReps}
-                      onChangeText={setNewReps}
-                      keyboardType="numeric"
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.inputLabel}>Weight (kg)</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="60"
-                      placeholderTextColor={COLORS.placeholderText}
-                      value={newWeight}
-                      onChangeText={setNewWeight}
-                      keyboardType="numeric"
-                    />
-                  </View>
-                </View>
+                ))}
+
+                {/* add exercise — this is the button you were asking about */}
+                <TouchableOpacity
+                  onPress={addNewExercise}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                    gap: 8, padding: 14, borderRadius: 12,
+                    borderWidth: 1, borderColor: COLORS.border,
+                    borderStyle: 'dashed', marginBottom: 20,
+                  }}
+                >
+                  <Ionicons name="add" size={20} color={COLORS.button} />
+                  <Text style={{ fontSize: 15, color: COLORS.button, fontWeight: '600' }}>
+                    Add exercise
+                  </Text>
+                </TouchableOpacity>
 
                 <TouchableOpacity
                   style={[styles.saveBtn, saving && { opacity: 0.6 }]}
