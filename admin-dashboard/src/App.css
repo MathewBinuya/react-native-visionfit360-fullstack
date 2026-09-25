@@ -57,9 +57,11 @@ body { background: var(--background); color: var(--black); }
 }
 .sidebar a.active, .sidebar a:hover { background: var(--input-bg); color: var(--black); }
 .sidebar .logout {
-  margin-top: auto; background: none; border: 1px solid var(--border); color: var(--black);
-  padding: 12px; border-radius: 10px; cursor: pointer; font-size: 14px;
+  margin-top: auto; background: #FDECEC; border: 1px solid #F5C6C6; color: #D14343;
+  padding: 12px; border-radius: 10px; cursor: pointer; font-size: 14px; font-weight: 500;
+  transition: background 0.15s;
 }
+.sidebar .logout:hover { background: #FBD9D9; }
 .main { flex: 1; padding: 32px; background: var(--input-bg); }
 .page-title { font-size: 24px; font-weight: 700; margin-bottom: 24px; }
 
