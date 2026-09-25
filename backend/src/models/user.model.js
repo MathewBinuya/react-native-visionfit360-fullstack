@@ -15,6 +15,7 @@ const userSchema = new mongoose.Schema(
     heightCm: Number,
     weightKg: Number,
     currentToken: { type: String, default: "" },
+    status: { type: String, enum: ["active", "inactive"], default: "active" },   
     // forgot password fields
     resetToken: { type: String, default: "" },
     resetTokenExpiry: { type: Date, default: null },
