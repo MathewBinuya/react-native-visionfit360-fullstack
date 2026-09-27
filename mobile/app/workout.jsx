@@ -10,10 +10,37 @@ import COLORS from "../constants/colors"
 import styles from '../assets/styles/workout.style'
 import api from '../lib/axios'
 
+const MAX_REPS = 100;
+const MAX_WEIGHT_KG = 1000;
+const MAX_SETS_PER_EXERCISE = 20;
+
 const emptyExercise = () => ({
   name: '',
   sets: [{ reps: '', weightKg: '', restSeconds: '60', completed: false }]
 });
+
+// strips anything that isn't a digit — also makes negative numbers impossible to type
+const sanitizeNumeric = (text) => text.replace(/[^0-9]/g, '');
+
+// shared validation for both Add and Edit — returns an error message string, or null if valid
+const validateExercises = (exercises) => {
+  for (const ex of exercises) {
+    if (ex.sets.length > MAX_SETS_PER_EXERCISE) {
+      return `"${ex.name || 'An exercise'}" has too many sets (max ${MAX_SETS_PER_EXERCISE}).`;
+    }
+    for (const s of ex.sets) {
+      const reps = s.reps === '' ? 0 : Number(s.reps);
+      const weight = s.weightKg === '' ? 0 : Number(s.weightKg);
+
+      if (isNaN(reps) || reps < 0) return "Reps can't be negative.";
+      if (reps > MAX_REPS) return `Reps can't exceed ${MAX_REPS}.`;
+
+      if (isNaN(weight) || weight < 0) return "Weight can't be negative.";
+      if (weight > MAX_WEIGHT_KG) return `Weight can't exceed ${MAX_WEIGHT_KG}kg.`;
+    }
+  }
+  return null;
+};
 
 export default function Workout() {
   const insets = useSafeAreaInsets();
@@ -76,12 +103,17 @@ export default function Workout() {
   };
 
   const updateNewSet = (exIdx, setIdx, field, value) => {
+    const cleaned = (field === 'reps' || field === 'weightKg') ? sanitizeNumeric(value) : value;
     const updated = [...newExercises];
-    updated[exIdx].sets[setIdx] = { ...updated[exIdx].sets[setIdx], [field]: value };
+    updated[exIdx].sets[setIdx] = { ...updated[exIdx].sets[setIdx], [field]: cleaned };
     setNewExercises(updated);
   };
 
   const addSetToNewExercise = (exIdx) => {
+    if (newExercises[exIdx].sets.length >= MAX_SETS_PER_EXERCISE) {
+      Alert.alert("Limit reached", `You can add up to ${MAX_SETS_PER_EXERCISE} sets per exercise.`);
+      return;
+    }
     const updated = [...newExercises];
     updated[exIdx].sets.push({ reps: '', weightKg: '', restSeconds: '60', completed: false });
     setNewExercises(updated);
@@ -126,12 +158,17 @@ export default function Workout() {
   };
 
   const updateSet = (exIdx, setIdx, field, value) => {
+    const cleaned = (field === 'reps' || field === 'weightKg') ? sanitizeNumeric(value) : value;
     const updated = [...editExercises];
-    updated[exIdx].sets[setIdx] = { ...updated[exIdx].sets[setIdx], [field]: value };
+    updated[exIdx].sets[setIdx] = { ...updated[exIdx].sets[setIdx], [field]: cleaned };
     setEditExercises(updated);
   };
 
   const addSetToExercise = (exIdx) => {
+    if (editExercises[exIdx].sets.length >= MAX_SETS_PER_EXERCISE) {
+      Alert.alert("Limit reached", `You can add up to ${MAX_SETS_PER_EXERCISE} sets per exercise.`);
+      return;
+    }
     const updated = [...editExercises];
     updated[exIdx].sets.push({ reps: '', weightKg: '', restSeconds: '60', completed: false });
     setEditExercises(updated);
@@ -157,6 +194,13 @@ export default function Workout() {
   //  SAVE EDIT 
   const saveEdit = async () => {
     if (!editTitle.trim()) { Alert.alert("Missing", "Please enter a workout title"); return; }
+
+    const validationError = validateExercises(editExercises);
+    if (validationError) {
+      Alert.alert("Invalid input", validationError);
+      return;
+    }
+
     setEditSaving(true);
     try {
       const payload = {
@@ -221,6 +265,12 @@ export default function Workout() {
     const validExercises = newExercises.filter(ex => ex.name.trim());
     if (validExercises.length === 0) {
       Alert.alert("Missing", "Please add at least one exercise");
+      return;
+    }
+
+    const validationError = validateExercises(validExercises);
+    if (validationError) {
+      Alert.alert("Invalid input", validationError);
       return;
     }
 
@@ -475,6 +525,7 @@ export default function Workout() {
                           placeholder="Reps"
                           placeholderTextColor={COLORS.placeholderText}
                           keyboardType="numeric"
+                          maxLength={3}
                         />
                         <TextInput
                           style={{
@@ -487,6 +538,7 @@ export default function Workout() {
                           placeholder="kg"
                           placeholderTextColor={COLORS.placeholderText}
                           keyboardType="numeric"
+                          maxLength={4}
                         />
                         <TouchableOpacity onPress={() => removeSet(exIdx, setIdx)} hitSlop={8}>
                           <Ionicons name="remove-circle-outline" size={20} color={COLORS.gray} />
@@ -631,6 +683,7 @@ export default function Workout() {
                           placeholder="Reps"
                           placeholderTextColor={COLORS.placeholderText}
                           keyboardType="numeric"
+                          maxLength={3}
                         />
                         <TextInput
                           style={{
@@ -643,6 +696,7 @@ export default function Workout() {
                           placeholder="kg"
                           placeholderTextColor={COLORS.placeholderText}
                           keyboardType="numeric"
+                          maxLength={4}
                         />
                         <TouchableOpacity onPress={() => removeNewSet(exIdx, setIdx)} hitSlop={8}>
                           <Ionicons name="remove-circle-outline" size={20} color={COLORS.gray} />
@@ -663,7 +717,7 @@ export default function Workout() {
                   </View>
                 ))}
 
-                {/* add exercise — this is the button you were asking about */}
+                {/* add exercise */}
                 <TouchableOpacity
                   onPress={addNewExercise}
                   style={{

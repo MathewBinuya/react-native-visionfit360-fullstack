@@ -10,6 +10,16 @@ import { useAuthStore } from '../../store/authStore'
 
 const GENDER_OPTIONS = ["male", "female", "other"];
 
+const MAX_HEIGHT_CM = 280;
+const MIN_HEIGHT_CM = 50;
+const MAX_WEIGHT_KG = 700;
+const MIN_WEIGHT_KG = 20;
+
+// strips anything that isn't a letter or space, as the user types
+const sanitizeName = (text) => text.replace(/[^a-zA-Z\s]/g, '');
+// strips anything that isn't a digit, as the user types (no letters, no minus sign, no decimals)
+const sanitizeNumeric = (text) => text.replace(/[^0-9]/g, '');
+
 export default function Profile() {
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
@@ -45,11 +55,33 @@ export default function Profile() {
   };
 
   const saveProfile = async () => {
+    const trimmedName = form.name.trim();
+    if (trimmedName && !/^[a-zA-Z\s]+$/.test(trimmedName)) {
+      Alert.alert("Invalid name", "Name can only contain letters and spaces.");
+      return;
+    }
+
+    if (form.heightCm) {
+      const h = Number(form.heightCm);
+      if (isNaN(h) || h < MIN_HEIGHT_CM || h > MAX_HEIGHT_CM) {
+        Alert.alert("Invalid height", `Height must be between ${MIN_HEIGHT_CM} and ${MAX_HEIGHT_CM} cm.`);
+        return;
+      }
+    }
+
+    if (form.weightKg) {
+      const w = Number(form.weightKg);
+      if (isNaN(w) || w < MIN_WEIGHT_KG || w > MAX_WEIGHT_KG) {
+        Alert.alert("Invalid weight", `Weight must be between ${MIN_WEIGHT_KG} and ${MAX_WEIGHT_KG} kg.`);
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       // 1) send the update
       await api.put("/profile", {
-        name: form.name,
+        name: trimmedName,
         bio: form.bio,
         gender: form.gender,
         heightCm: form.heightCm ? Number(form.heightCm) : undefined,
@@ -149,7 +181,7 @@ export default function Profile() {
           placeholder="Your name"
           placeholderTextColor={COLORS.placeholderText}
           value={form.name}
-          onChangeText={(t) => setForm({ ...form, name: t })}
+          onChangeText={(t) => setForm({ ...form, name: sanitizeName(t) })}
         />
       </View>
 
@@ -192,8 +224,9 @@ export default function Profile() {
               placeholder="175"
               placeholderTextColor={COLORS.placeholderText}
               value={form.heightCm}
-              onChangeText={(t) => setForm({ ...form, heightCm: t })}
+              onChangeText={(t) => setForm({ ...form, heightCm: sanitizeNumeric(t) })}
               keyboardType="numeric"
+              maxLength={3}
             />
           </View>
         </View>
@@ -205,8 +238,9 @@ export default function Profile() {
               placeholder="70"
               placeholderTextColor={COLORS.placeholderText}
               value={form.weightKg}
-              onChangeText={(t) => setForm({ ...form, weightKg: t })}
+              onChangeText={(t) => setForm({ ...form, weightKg: sanitizeNumeric(t) })}
               keyboardType="numeric"
+              maxLength={3}
             />
           </View>
         </View>
