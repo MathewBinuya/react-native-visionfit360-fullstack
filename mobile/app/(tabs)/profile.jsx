@@ -1,4 +1,4 @@
-import { View, Text, TextInput, TouchableOpacity, ScrollView, Image, Alert, ActivityIndicator } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, ScrollView, Image, Alert, ActivityIndicator, RefreshControl } from 'react-native'
 import { useState, useEffect } from 'react'
 import { router } from 'expo-router'
 import { Ionicons } from "@expo/vector-icons"
@@ -15,9 +15,7 @@ const MIN_HEIGHT_CM = 50;
 const MAX_WEIGHT_KG = 700;
 const MIN_WEIGHT_KG = 20;
 
-// strips anything that isn't a letter or space, as the user types
 const sanitizeName = (text) => text.replace(/[^a-zA-Z\s]/g, '');
-// strips anything that isn't a digit, as the user types (no letters, no minus sign, no decimals)
 const sanitizeNumeric = (text) => text.replace(/[^0-9]/g, '');
 
 export default function Profile() {
@@ -29,6 +27,7 @@ export default function Profile() {
   const [photo, setPhoto] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     loadProfile();
@@ -45,13 +44,18 @@ export default function Profile() {
         weightKg: res.data.weightKg?.toString() || "",
       });
       setPhoto(res.data.photo || "");
-      // keep the store in sync on load too, so Home's greeting matches
       await setUser({ ...user, ...res.data });
     } catch (error) {
       Alert.alert("Error", error.response?.data?.message || "Failed to load profile");
     } finally {
       setLoading(false);
     }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadProfile();
+    setRefreshing(false);
   };
 
   const saveProfile = async () => {
@@ -79,7 +83,6 @@ export default function Profile() {
 
     setSaving(true);
     try {
-      // 1) send the update
       await api.put("/profile", {
         name: trimmedName,
         bio: form.bio,
@@ -88,7 +91,6 @@ export default function Profile() {
         weightKg: form.weightKg ? Number(form.weightKg) : undefined,
       });
 
-      // 2) re-fetch the fresh profile from the server to confirm what was actually saved
       const fresh = await api.get("/profile");
       setForm({
         name: fresh.data.name || "",
@@ -98,8 +100,6 @@ export default function Profile() {
         weightKg: fresh.data.weightKg?.toString() || "",
       });
       setPhoto(fresh.data.photo || "");
-
-      // 3) update the store so Home's "Hello, name" updates immediately
       await setUser({ ...user, ...fresh.data });
 
       Alert.alert("Saved", "Profile updated");
@@ -153,8 +153,13 @@ export default function Profile() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ padding: 20 }}>
-      {/* avatar + photo */}
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={{ padding: 20 }}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.button} colors={[COLORS.button]} />
+      }
+    >
       <View style={styles.avatarWrap}>
         {photo ? (
           <Image source={{ uri: photo }} style={styles.avatar} />
@@ -169,11 +174,9 @@ export default function Profile() {
           <Ionicons name="camera-outline" size={16} color={COLORS.button} />
           <Text style={styles.changePhotoText}>Change photo</Text>
         </TouchableOpacity>
-        {/* edited username fix*/}
         <Text style={styles.usernameText}>@{user?.name || user?.username }</Text>
       </View>
 
-      {/* Name */}
       <Text style={styles.label}>Name</Text>
       <View style={styles.inputContainer}>
         <TextInput
@@ -185,7 +188,6 @@ export default function Profile() {
         />
       </View>
 
-      {/* Bio */}
       <Text style={styles.label}>Bio</Text>
       <View style={styles.inputContainer}>
         <TextInput
@@ -198,7 +200,6 @@ export default function Profile() {
         />
       </View>
 
-      {/* Gender */}
       <Text style={styles.label}>Gender</Text>
       <View style={styles.genderRow}>
         {GENDER_OPTIONS.map((option) => (
@@ -214,7 +215,6 @@ export default function Profile() {
         ))}
       </View>
 
-      {/* Height & Weight */}
       <View style={styles.row}>
         <View style={{ flex: 1 }}>
           <Text style={styles.label}>Height (cm)</Text>
@@ -246,7 +246,6 @@ export default function Profile() {
         </View>
       </View>
 
-      {/* Save */}
       <TouchableOpacity
         style={[styles.saveBtn, saving && { opacity: 0.6 }]}
         onPress={saveProfile}
@@ -255,7 +254,6 @@ export default function Profile() {
         <Text style={styles.saveText}>{saving ? "Saving..." : "Save changes"}</Text>
       </TouchableOpacity>
 
-      {/* Logout */}
       <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
         <Ionicons name="log-out-outline" size={18} color="#a32d2d" />
         <Text style={styles.logoutText}>Logout</Text>

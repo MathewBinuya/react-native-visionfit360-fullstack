@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, ScrollView, Image } from 'react-native'
+import { View, Text, TouchableOpacity, ScrollView, Image, RefreshControl } from 'react-native'
 import { useState, useEffect, useCallback } from 'react'
 import { router, useFocusEffect } from 'expo-router'
 import { Ionicons } from "@expo/vector-icons"
@@ -10,6 +10,7 @@ import { useAuthStore } from '../../store/authStore'
 export default function Home() {
   const user = useAuthStore((s) => s.user);
   const [workouts, setWorkouts] = useState([]);
+  const [refreshing, setRefreshing] = useState(false);
 
   // reload completed workouts every time home comes into focus
   useFocusEffect(
@@ -25,6 +26,12 @@ export default function Home() {
     } catch (error) {
       console.log("Failed to load workouts", error.message);
     }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadWorkouts();
+    setRefreshing(false);
   };
 
   //   derived stats 
@@ -105,7 +112,12 @@ export default function Home() {
           </TouchableOpacity>
         </View>
     </View>
-      <ScrollView contentContainerStyle={{ padding: 16 }}>
+      <ScrollView
+        contentContainerStyle={{ padding: 16 }}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.button} colors={[COLORS.button]} />
+        }
+      >
         {/* stats strip */}
         <View style={styles.statsRow}>
           <View style={styles.statCard}>

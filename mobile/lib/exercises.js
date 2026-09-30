@@ -180,7 +180,7 @@ export const AR_EXERCISES = [
     group: "Chest",
     icon: "fitness-outline",
     targetReps: 10,
-    working: false,
+    working: true,
     tips: [
       "Position at a 45° angle so your arm is visible",
       "Lower until your elbows bend to about 90°",

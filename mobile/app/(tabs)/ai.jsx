@@ -1,11 +1,12 @@
 import { View, Text, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator, Alert, BackHandler, Share } from 'react-native'
 import { useState, useEffect, useRef } from 'react'
 import { Ionicons } from "@expo/vector-icons"
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import COLORS from "../../constants/colors"
 import styles from '../../assets/styles/tabStyle/ai.style'
 import api from '../../lib/axios'
+import { useAuthStore } from '../../store/authStore'
 
-// turns the structured {intro, title, exercises} recommendation into readable chat text
 const formatRecommendationText = (rec) => {
   const exerciseLines = rec.exercises.map((ex) => {
     const uniform = ex.sets.length > 1 && ex.sets.every(
@@ -21,29 +22,52 @@ const formatRecommendationText = (rec) => {
 };
 
 export default function AICoach() {
-  // messages: { role: "user" | "model", text: string, workoutData?: { title, exercises } }
+  const user = useAuthStore((s) => s.user);
+
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const scrollRef = useRef(null);
 
-  //  THREE DOTS MENU STATE 
-  const [menuMessage, setMenuMessage] = useState(null); // { index, message }
+  const [menuMessage, setMenuMessage] = useState(null);
   const [addingToTracker, setAddingToTracker] = useState(false);
+
+  //  FIRST-TIME GUIDE 
+  const [showGuide, setShowGuide] = useState(false);
+  const guideKey = `hasSeenAICoachGuide:${user?.id || 'unknown'}`;
 
   useEffect(() => {
     getInitialRecommendation();
+    checkFirstVisit();
   }, []);
 
+  const checkFirstVisit = async () => {
+    try {
+      const seen = await AsyncStorage.getItem(guideKey);
+      if (!seen) setShowGuide(true);
+    } catch (e) {
+      // not critical — just skip the guide if storage fails
+    }
+  };
+
+  const dismissGuide = async () => {
+    setShowGuide(false);
+    try {
+      await AsyncStorage.setItem(guideKey, 'true');
+    } catch (e) {}
+  };
+
+  //  ANDROID HARDWARE BACK BUTTON 
   useEffect(() => {
     const backAction = () => {
+      if (showGuide) { dismissGuide(); return true; }
       if (menuMessage) { setMenuMessage(null); return true; }
       return false;
     };
     const sub = BackHandler.addEventListener('hardwareBackPress', backAction);
     return () => sub.remove();
-  }, [menuMessage]);
+  }, [menuMessage, showGuide]);
 
   const getInitialRecommendation = async () => {
     try {
@@ -148,6 +172,7 @@ export default function AICoach() {
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 30}
     >
+      {/* header */}
       <View style={styles.header}>
         <View style={styles.headerIcon}>
           <Ionicons name="sparkles" size={20} color={COLORS.white} />
@@ -156,8 +181,16 @@ export default function AICoach() {
           <Text style={styles.headerTitle}>Smart Plan</Text>
           <Text style={styles.headerSub}>Your personal fitness guide</Text>
         </View>
+        <TouchableOpacity
+          onPress={() => setShowGuide(true)}
+          hitSlop={10}
+          style={{ marginLeft: 'auto', padding: 4 }}
+        >
+          <Ionicons name="help-circle-outline" size={22} color={COLORS.white} />
+        </TouchableOpacity>
       </View>
 
+      {/* messages */}
       <ScrollView
         ref={scrollRef}
         style={styles.messages}
@@ -171,24 +204,19 @@ export default function AICoach() {
         ) : (
           messages.map((m, i) => (
             <View key={i} style={{ marginBottom: 4 }}>
-              <View
-                style={[
-                  styles.bubble,
-                  m.role === "user" ? styles.userBubble : styles.coachBubble,
-                ]}
-              >
-                <Text style={m.role === "user" ? styles.userText : styles.coachText}>
-                  {m.text}
-                </Text>
-              </View>
-              {m.role === "model" && (
+              {m.role === "model" ? (
                 <TouchableOpacity
-                  onPress={() => setMenuMessage({ index: i, message: m })}
-                  hitSlop={10}
-                  style={{ alignSelf: "flex-start", padding: 6, marginLeft: 4 }}
+                  activeOpacity={0.7}
+                  delayLongPress={350}
+                  onLongPress={() => setMenuMessage({ index: i, message: m })}
+                  style={[styles.bubble, styles.coachBubble]}
                 >
-                  <Ionicons name="ellipsis-horizontal" size={18} color={COLORS.placeholderText} />
+                  <Text style={styles.coachText}>{m.text}</Text>
                 </TouchableOpacity>
+              ) : (
+                <View style={[styles.bubble, styles.userBubble]}>
+                  <Text style={styles.userText}>{m.text}</Text>
+                </View>
               )}
             </View>
           ))
@@ -201,32 +229,22 @@ export default function AICoach() {
         )}
       </ScrollView>
 
+      {/*  THREE DOTS MENU OVERLAY (now opened via long-press)  */}
       {!!menuMessage && (
-        <View style={{
-          position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-          zIndex: 50, elevation: 50,
-        }}>
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 50, elevation: 50 }}>
           <TouchableOpacity
             style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }}
             activeOpacity={1}
             onPress={() => setMenuMessage(null)}
           >
             <View style={{
-              position: 'absolute',
-              bottom: 24,
-              left: 24, right: 24,
-              backgroundColor: COLORS.white,
-              borderRadius: 16,
-              borderWidth: 1,
-              borderColor: COLORS.border,
-              overflow: 'hidden',
+              position: 'absolute', bottom: 24, left: 24, right: 24,
+              backgroundColor: COLORS.white, borderRadius: 16, borderWidth: 1,
+              borderColor: COLORS.border, overflow: 'hidden',
             }}>
               <TouchableOpacity
                 onPress={handleShare}
-                style={{
-                  flexDirection: 'row', alignItems: 'center', gap: 14,
-                  padding: 16, borderBottomWidth: 1, borderBottomColor: COLORS.border,
-                }}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16, borderBottomWidth: 1, borderBottomColor: COLORS.border }}
               >
                 <Ionicons name="share-outline" size={20} color={COLORS.button} />
                 <Text style={{ fontSize: 15, fontWeight: '600', color: COLORS.button }}>Share</Text>
@@ -236,20 +254,14 @@ export default function AICoach() {
                 <TouchableOpacity
                   onPress={handleSetToTracker}
                   disabled={addingToTracker}
-                  style={{
-                    flexDirection: 'row', alignItems: 'center', gap: 14,
-                    padding: 16, borderBottomWidth: 1, borderBottomColor: COLORS.border,
-                    opacity: addingToTracker ? 0.6 : 1,
-                  }}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16, borderBottomWidth: 1, borderBottomColor: COLORS.border, opacity: addingToTracker ? 0.6 : 1 }}
                 >
                   {addingToTracker ? (
                     <ActivityIndicator size="small" color={COLORS.button} />
                   ) : (
                     <Ionicons name="barbell-outline" size={20} color={COLORS.button} />
                   )}
-                  <Text style={{ fontSize: 15, fontWeight: '600', color: COLORS.button }}>
-                    Set to workout tracker
-                  </Text>
+                  <Text style={{ fontSize: 15, fontWeight: '600', color: COLORS.button }}>Set to workout tracker</Text>
                 </TouchableOpacity>
               )}
 
@@ -265,6 +277,46 @@ export default function AICoach() {
         </View>
       )}
 
+      {/*  FIRST-TIME GUIDE (auto-shows once per account, reopenable via the ? icon)  */}
+      {showGuide && !initialLoading && (
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 90, elevation: 90 }}>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+            <View style={{ backgroundColor: COLORS.white, borderRadius: 20, padding: 24, width: '100%', maxWidth: 400 }}>
+              <View style={{ alignItems: 'center', marginBottom: 16 }}>
+                <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: COLORS.button, justifyContent: 'center', alignItems: 'center', marginBottom: 12 }}>
+                  <Ionicons name="sparkles" size={26} color={COLORS.white} />
+                </View>
+                <Text style={{ fontSize: 18, fontWeight: '700', color: COLORS.black, textAlign: 'center' }}>
+                  Meet your AI Coach
+                </Text>
+              </View>
+
+              <View style={{ marginBottom: 14, flexDirection: 'row', gap: 10 }}>
+                <Ionicons name="chatbubble-ellipses-outline" size={20} color={COLORS.button} style={{ marginTop: 2 }} />
+                <Text style={{ flex: 1, fontSize: 14, color: COLORS.gray, lineHeight: 20 }}>
+                  Your coach gives you a workout automatically, and you can ask it anything — try "give me a leg day".
+                </Text>
+              </View>
+
+              <View style={{ marginBottom: 22, flexDirection: 'row', gap: 10 }}>
+                <Ionicons name="barbell-outline" size={20} color={COLORS.button} style={{ marginTop: 2 }} />
+                <Text style={{ flex: 1, fontSize: 14, color: COLORS.gray, lineHeight: 20 }}>
+                  Long-press any workout message to set it to your workout tracker, share it, or delete it.
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={{ backgroundColor: COLORS.button, borderRadius: 12, padding: 14, alignItems: 'center' }}
+                onPress={dismissGuide}
+              >
+                <Text style={{ color: COLORS.white, fontSize: 15, fontWeight: '700' }}>Got it</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+
+      {/* input */}
       <View style={styles.inputBar}>
         <TextInput
           style={styles.input}

@@ -17,6 +17,7 @@ import { Ionicons } from "@expo/vector-icons"
 import { useRouter } from 'expo-router';
 import COLORS from '../../constants/colors';
 import styles from '../../assets/styles/authStyle/signup.style';
+import { isAllowedEmail, EMAIL_DOMAIN_ERROR } from '../../lib/emailValidator';
 
 import {useAuthStore} from "../../store/authStore"
 
@@ -50,6 +51,11 @@ const [showTerms, setShowTerms] = useState(false);
 
 const {user, isLoading, register, token} = useAuthStore();
 
+// ---- email domain check (live) ----
+// only show the inline error once the user has typed a full-looking domain (e.g. "name@abc.com")
+const emailDomain = email.trim().split("@")[1] || "";
+const showEmailError = emailDomain.includes(".") && !isAllowedEmail(email);
+
 // ---- password rule checks (live) ----
 const hasMinLength = password.length >= 8;
 const hasLetter = /[a-zA-Z]/.test(password);
@@ -82,6 +88,10 @@ useEffect(() => {
 
 const handleSignUp = async () => {
   // client-side guard (backend still enforces it too)
+  if (!isAllowedEmail(email)) {
+    Alert.alert("Invalid Email", EMAIL_DOMAIN_ERROR);
+    return;
+  }
   if (!isValidPassword) {
     Alert.alert("Weak Password", "Password must be at least 8 characters and include a letter and a number.");
     return;
@@ -149,6 +159,9 @@ const handleSignUp = async () => {
               maxLength={100}
             />
           </View>
+          {showEmailError && (
+            <Text style={pwStyles.emailError}>{EMAIL_DOMAIN_ERROR}</Text>
+          )}
         </View>
                {/* Password */}
         <View style={styles.inputGroup}>
@@ -223,7 +236,7 @@ const handleSignUp = async () => {
         </View>
         </View>
          <TouchableOpacity
-           style={[styles.button, ((!isValidPassword && password.length > 0) || !agreedToTerms) && { opacity: 0.6 }]}
+           style={[styles.button, ((!isValidPassword && password.length > 0) || !agreedToTerms || showEmailError) && { opacity: 0.6 }]}
            onPress={handleSignUp}
            disabled={isLoading}
          >
@@ -273,6 +286,7 @@ const handleSignUp = async () => {
 
 // local styles for the password feedback (kept separate so your main style file stays untouched)
 const pwStyles = StyleSheet.create({
+  emailError: { fontSize: 12, color: "#E24B4A", marginTop: 6 },
   feedbackWrap: { marginTop: 10 },
   meterRow: { flexDirection: "row", gap: 6, marginBottom: 6 },
   meterSegment: { flex: 1, height: 6, borderRadius: 3, backgroundColor: COLORS.border },

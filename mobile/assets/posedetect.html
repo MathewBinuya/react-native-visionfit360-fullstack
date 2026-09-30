@@ -6,69 +6,34 @@
     body { margin: 0; background: #000; overflow: hidden; }
     #hud { position: absolute; top: 20px; left: 0; right: 0; z-index: 10; text-align: center; color: #fff; font-family: sans-serif; }
     #repcount { font-size: 64px; font-weight: bold; }
-    #status { font-size: 18px; }
+    #status { font-size: 18px; padding: 0 16px; }
     #debug { font-size: 16px; color: #FFD700; margin-top: 8px; font-weight: bold; }
     #wrap { position: relative; width: 100vw; height: 100vh; }
-    video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
-    video { transform: scaleX(-1); }
-    canvas { transform: scaleX(-1); }
+    video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
     #formBorder {
-      position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-      z-index: 9; pointer-events: none;
-      border: 0px solid transparent;
-      box-sizing: border-box;
+      position: absolute; inset: 0; z-index: 9; pointer-events: none;
+      border: 0px solid transparent; box-sizing: border-box;
       transition: border-color 0.15s ease, border-width 0.15s ease;
     }
-
-    /* --- 15s pre-start countdown --- */
     #countdownOverlay {
-      position: absolute;
-      inset: 0;
-      z-index: 20;
-      display: none;
-      align-items: center;
-      justify-content: center;
-      flex-direction: column;
+      position: absolute; inset: 0; z-index: 20; display: none;
+      align-items: center; justify-content: center; flex-direction: column;
       background: rgba(0, 0, 0, 0.45);
     }
     #countdownRing {
-      position: relative;
-      width: 170px;
-      height: 170px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      position: relative; width: 170px; height: 170px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
       background: conic-gradient(#5DCAA5 var(--progress, 360deg), rgba(255, 255, 255, 0.18) 0deg);
       transition: background 0.9s linear;
     }
     #countdownInner {
-      width: 142px;
-      height: 142px;
-      border-radius: 50%;
-      background: #0a0a0a;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      width: 142px; height: 142px; border-radius: 50%; background: #0a0a0a;
+      display: flex; align-items: center; justify-content: center;
     }
-    #countdownNumber {
-      font-family: sans-serif;
-      font-size: 56px;
-      font-weight: bold;
-      color: #fff;
-    }
+    #countdownNumber { font-family: sans-serif; font-size: 56px; font-weight: bold; color: #fff; }
     #countdownNumber.pulse { animation: countPulse 0.35s ease-out; }
-    @keyframes countPulse {
-      0% { transform: scale(1.25); opacity: 0.3; }
-      100% { transform: scale(1); opacity: 1; }
-    }
-    #countdownLabel {
-      margin-top: 20px;
-      font-family: sans-serif;
-      font-size: 18px;
-      color: #fff;
-      opacity: 0.85;
-    }
+    @keyframes countPulse { 0% { transform: scale(1.25); opacity: 0.3; } 100% { transform: scale(1); opacity: 1; } }
+    #countdownLabel { margin-top: 20px; font-family: sans-serif; font-size: 18px; color: #fff; opacity: 0.85; }
   </style>
 </head>
 <body>
@@ -78,22 +43,15 @@
     <div id="debug">--</div>
   </div>
   <div id="wrap">
-    <video id="video" autoplay playsinline></video>
+    <video id="video" autoplay playsinline muted></video>
     <canvas id="canvas"></canvas>
     <div id="formBorder"></div>
-
     <div id="countdownOverlay">
-      <div id="countdownRing">
-        <div id="countdownInner">
-          <div id="countdownNumber">15</div>
-        </div>
-      </div>
+      <div id="countdownRing"><div id="countdownInner"><div id="countdownNumber">5</div></div></div>
       <div id="countdownLabel">Get into position</div>
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
   <script>
     function send(obj) {
       if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(obj));
@@ -103,6 +61,12 @@
     const params = new URLSearchParams(window.location.search);
     const exercise = params.get('exercise') || 'squat';
 
+    // ---- A/B SWITCHES: override from the page URL, e.g. ...?exercise=squat&angles=2d&gate=0&variant=heavy ----
+    const USE_WORLD_ANGLES = params.get('angles') !== '2d';       // 3D joint angles (&angles=2d = old image-pixel angles)
+    const USE_BODY_SCALE   = params.get('scale') !== '0';         // distance-scaled pixel thresholds (&scale=0 = old fixed pixels)
+    const COUNT_MIN_VIS    = params.get('gate') === '0' ? 0 : 0.5; // joints below this visibility are ignored when counting (&gate=0 = off)
+    const VARIANT = ['lite', 'full', 'heavy'].includes(params.get('variant')) ? params.get('variant') : 'full';
+
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
@@ -111,8 +75,61 @@
     const formBorder = document.getElementById('formBorder');
 
     let detector = null, count = 0, stage = 'up', formIsGood = true, lastAngle = 180;
-    let formMsg = '';
-    const MIN_SCORE = 0.3;
+    let formMsg = '', lastVideoTime = -1;
+    const MIN_SCORE = 0.5;   // skeleton drawing threshold
+    const SKELETON_COLOR = '#000000';   // gray skeleton lines/dots — set to '#000000' for black
+
+    // Paste the exact MediaPipe version here to pin it (see note under the code). Empty = latest, same as before.
+    const MP_VERSION = '';
+    const MP = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision' + (MP_VERSION ? '@' + MP_VERSION : '');
+    const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_' +
+      VARIANT + '/float16/1/pose_landmarker_' + VARIANT + '.task';
+    const MODEL_LOAD_TIMEOUT_MS = 60000;
+
+    // ---- BODY-SCALE NORMALIZATION ----
+    const REF_TORSO_PX = 110;
+    let torsoPx = 0, bodyScale = 1;
+
+    // ---- SIDE SELECTION (used only by exercises still on single-side tracking) ----
+    const SIDE_SWITCH_MARGIN = 0.4;
+    let activeSide = 'left';
+
+    // add ?debug=0 to hide the yellow debug line and the grey readout
+    const fpsEl = document.createElement('div');
+    fpsEl.style.cssText = 'font-size:12px;color:#9aa0a6;margin-top:4px;';
+    document.getElementById('hud').appendChild(fpsEl);
+    if (params.get('debug') === '0') { debugEl.style.display = 'none'; fpsEl.style.display = 'none'; }
+
+    let frameCount = 0, lastFpsTime = performance.now(), delegateName = '';
+    setInterval(() => {
+      const now = performance.now();
+      const fps = frameCount / ((now - lastFpsTime) / 1000);
+      fpsEl.textContent = [
+        VARIANT, delegateName || '...', fps.toFixed(1) + ' fps',
+        USE_WORLD_ANGLES ? '3D' : '2D',
+        COUNT_MIN_VIS ? 'gate' : 'nogate',
+        USE_BODY_SCALE ? 'scale' : 'noscale',
+        torsoPx ? 'torso ' + Math.round(torsoPx) + 'px' : 'torso -',
+      ].join(' · ');
+      frameCount = 0;
+      lastFpsTime = now;
+    }, 1000);
+
+    const LM_NAMES = {
+      0: 'nose', 11: 'left_shoulder', 12: 'right_shoulder', 13: 'left_elbow', 14: 'right_elbow',
+      15: 'left_wrist', 16: 'right_wrist', 23: 'left_hip', 24: 'right_hip',
+      25: 'left_knee', 26: 'right_knee', 27: 'left_ankle', 28: 'right_ankle',
+    };
+    function toKeypoints(lms, wlms, w, h) {
+      return Object.keys(LM_NAMES).map(i => {
+        const l = lms[i];
+        const wl = wlms ? wlms[i] : null;
+        return {
+          name: LM_NAMES[i], x: l.x * w, y: l.y * h, score: l.visibility ?? 1,
+          wx: wl ? wl.x : undefined, wy: wl ? wl.y : undefined, wz: wl ? wl.z : undefined,
+        };
+      });
+    }
 
     const CONNECTIONS = [
       ['left_shoulder','right_shoulder'],['left_shoulder','left_elbow'],['left_elbow','left_wrist'],
@@ -122,27 +139,91 @@
       ['right_hip','right_knee'],['right_knee','right_ankle'],
     ];
 
-    let headMax = 0;
-    let headMin = 9999;
-
-    function angle(a, b, c) {
+    function angle2D(a, b, c) {
       const ab = { x: a.x - b.x, y: a.y - b.y };
       const cb = { x: c.x - b.x, y: c.y - b.y };
       const dot = ab.x * cb.x + ab.y * cb.y;
       const magAB = Math.sqrt(ab.x*ab.x + ab.y*ab.y);
       const magCB = Math.sqrt(cb.x*cb.x + cb.y*cb.y);
       if (magAB === 0 || magCB === 0) return lastAngle;
-      let cos = dot / (magAB * magCB);
-      cos = Math.max(-1, Math.min(1, cos));
+      const cos = Math.max(-1, Math.min(1, dot / (magAB * magCB)));
       return Math.acos(cos) * (180 / Math.PI);
     }
-    function kp(keypoints, name) { return keypoints.find(k => k.name === name); }
+    function angle3D(a, b, c) {
+      const ab = { x: a.wx - b.wx, y: a.wy - b.wy, z: a.wz - b.wz };
+      const cb = { x: c.wx - b.wx, y: c.wy - b.wy, z: c.wz - b.wz };
+      const dot = ab.x * cb.x + ab.y * cb.y + ab.z * cb.z;
+      const magAB = Math.sqrt(ab.x*ab.x + ab.y*ab.y + ab.z*ab.z);
+      const magCB = Math.sqrt(cb.x*cb.x + cb.y*cb.y + cb.z*cb.z);
+      if (magAB === 0 || magCB === 0) return lastAngle;
+      const cos = Math.max(-1, Math.min(1, dot / (magAB * magCB)));
+      return Math.acos(cos) * (180 / Math.PI);
+    }
+    function ang(a, b, c) {
+      if (USE_WORLD_ANGLES && a.wx !== undefined && b.wx !== undefined && c.wx !== undefined) return angle3D(a, b, c);
+      return angle2D(a, b, c);
+    }
+
+    function kp(keypoints, name) {
+      const k = keypoints.find(k => k.name === name);
+      if (!k) return undefined;
+      if (COUNT_MIN_VIS && k.score < COUNT_MIN_VIS) return undefined;
+      return k;
+    }
+    function kpRaw(keypoints, name) { return keypoints.find(k => k.name === name); }
+
+    // NEW: computes an angle using both left and right sides and averages them when both
+    // are visible — for exercises done with both limbs together (front raise, bicep curl,
+    // lateral raise, push-up). Falls back to a single side if the other is occluded/out of frame.
+    function angBoth(keypoints, jointA, jointB, jointC) {
+      const lA = kp(keypoints, 'left_' + jointA), lB = kp(keypoints, 'left_' + jointB), lC = kp(keypoints, 'left_' + jointC);
+      const rA = kp(keypoints, 'right_' + jointA), rB = kp(keypoints, 'right_' + jointB), rC = kp(keypoints, 'right_' + jointC);
+      const leftOk = lA && lB && lC;
+      const rightOk = rA && rB && rC;
+      if (leftOk && rightOk) {
+        const l = ang(lA, lB, lC), r = ang(rA, rB, rC);
+        return { value: (l + r) / 2, sides: 'both' };
+      }
+      if (leftOk) return { value: ang(lA, lB, lC), sides: 'left' };
+      if (rightOk) return { value: ang(rA, rB, rC), sides: 'right' };
+      return null;
+    }
 
     let smoothHistory = [];
     function smooth(val) {
       smoothHistory.push(val);
       if (smoothHistory.length > 4) smoothHistory.shift();
       return smoothHistory.reduce((a, b) => a + b, 0) / smoothHistory.length;
+    }
+
+    function pickSide(keypoints, joints) {
+      const sideScore = (side) => joints.reduce((t, j) => {
+        const k = kpRaw(keypoints, side + '_' + j);
+        return t + (k && k.score ? k.score : 0);
+      }, 0);
+      const l = sideScore('left'), r = sideScore('right');
+      let next = activeSide;
+      if (activeSide === 'left' && r > l + SIDE_SWITCH_MARGIN) next = 'right';
+      else if (activeSide === 'right' && l > r + SIDE_SWITCH_MARGIN) next = 'left';
+      if (next !== activeSide) { activeSide = next; smoothHistory = []; }
+      return activeSide;
+    }
+
+    function updateBodyScale(keypoints) {
+      if (!USE_BODY_SCALE) { bodyScale = 1; return; }
+      const lens = [];
+      ['left', 'right'].forEach(side => {
+        const s = kp(keypoints, side + '_shoulder');
+        const h = kp(keypoints, side + '_hip');
+        if (s && h) {
+          const dx = Math.abs(s.x - h.x), dy = Math.abs(s.y - h.y);
+          if (dy > 0 && dx < dy * 0.6) lens.push(Math.sqrt(dx * dx + dy * dy));
+        }
+      });
+      if (!lens.length) return;
+      const cur = lens.reduce((a, b) => a + b, 0) / lens.length;
+      torsoPx = torsoPx ? torsoPx * 0.9 + cur * 0.1 : cur;
+      bodyScale = Math.max(0.4, Math.min(3, torsoPx / REF_TORSO_PX));
     }
 
     const kpHistory = {};
@@ -168,79 +249,76 @@
       if (primaryAngle > upThreshold && stage === 'down') { stage = 'up'; rep(); }
     }
 
+    let lastFormSent = null;
+    function sendFormIfChanged() {
+      const key = formIsGood + '|' + formMsg;
+      if (key === lastFormSent) return;
+      lastFormSent = key;
+      send({ type: 'form', good: formIsGood, msg: formMsg });
+    }
+
     const EXERCISES = {
 
       squat: function (keypoints) {
-        const hip = kp(keypoints, 'left_hip');
-        const knee = kp(keypoints, 'left_knee');
-        const ankle = kp(keypoints, 'left_ankle');
-        const shoulder = kp(keypoints, 'left_shoulder');
+        const S = pickSide(keypoints, ['hip', 'knee', 'ankle']);
+        const hip = kp(keypoints, S + '_hip'), knee = kp(keypoints, S + '_knee');
+        const ankle = kp(keypoints, S + '_ankle'), shoulder = kp(keypoints, S + '_shoulder');
         if (!(hip && knee && ankle)) { debugEl.textContent = 'legs unclear'; return; }
-        const kneeAngle = smooth(angle(hip, knee, ankle));
+        const kneeAngle = smooth(ang(hip, knee, ankle));
         lastAngle = kneeAngle;
-        const backAngle = shoulder ? angle(shoulder, hip, knee) : 180;
+        const backAngle = shoulder ? ang(shoulder, hip, knee) : 180;
         formIsGood = !(stage === 'down' && backAngle <= 45);
         formMsg = formIsGood ? '' : 'Keep your back upright';
-        debugEl.textContent = 'KNEE:' + Math.round(kneeAngle) + ' BACK:' + Math.round(backAngle) + ' ' + stage + ' reps:' + count;
+        debugEl.textContent = 'KNEE:' + Math.round(kneeAngle) + ' BACK:' + Math.round(backAngle) + ' ' + stage + ' reps:' + count + ' side:' + S;
         countRep(kneeAngle, 130, 150);
       },
 
+      // BOTH ARMS: averages left+right elbow angle when both visible
       bicepcurl: function (keypoints) {
-      const shoulder = kp(keypoints, 'left_shoulder');
-      const elbow = kp(keypoints, 'left_elbow');
-      const wrist = kp(keypoints, 'left_wrist');
-      const hip = kp(keypoints, 'left_hip');
-      if (!(shoulder && elbow && wrist)) { debugEl.textContent = 'arm unclear — show your arm'; return; }
+        const elbowRes = angBoth(keypoints, 'shoulder', 'elbow', 'wrist');
+        if (!elbowRes) { debugEl.textContent = 'arm(s) unclear — show your arm(s)'; return; }
+        const elbowAngle = smooth(elbowRes.value);
+        lastAngle = elbowAngle;
 
-      const elbowAngle = smooth(angle(shoulder, elbow, wrist));
-      lastAngle = elbowAngle;
+        const upperArmRes = angBoth(keypoints, 'hip', 'shoulder', 'elbow');
+        const upperArmAngle = upperArmRes ? upperArmRes.value : 0;
+        formIsGood = !(upperArmRes && upperArmAngle > 60);
+        formMsg = formIsGood ? '' : 'Keep your elbow(s) still';
 
-      // looser form check (only flag a big swing), and never blocks counting
-      let upperArmAngle = hip ? angle(hip, shoulder, elbow) : 0;
-      formIsGood = !(hip && upperArmAngle > 60);   // was 45 — now more forgiving
-      formMsg = formIsGood ? '' : 'Keep your elbow still';
+        debugEl.textContent = 'ELBOW:' + Math.round(elbowAngle) + ' UPARM:' + Math.round(upperArmAngle) + ' ' + stage + ' reps:' + count + ' sides:' + elbowRes.sides;
+        countRep(elbowAngle, 80, 140);
+      },
 
-      debugEl.textContent = 'ELBOW:' + Math.round(elbowAngle) + ' UPARM:' + Math.round(upperArmAngle) + ' ' + stage + ' reps:' + count;
-
-      // WIDER thresholds so partial curls still count: curl under 80, extend over 140
-      countRep(elbowAngle, 80, 140);   // was 60, 150 — easier to trigger both states
-     },
-
+      // BOTH ARMS: averages left+right hip-shoulder-wrist angle when both visible
       lateralraise: function (keypoints) {
-        const hip = kp(keypoints, 'left_hip');
-        const shoulder = kp(keypoints, 'left_shoulder');
-        const wrist = kp(keypoints, 'left_wrist');
-        if (!(hip && shoulder && wrist)) { debugEl.textContent = 'arm unclear — show your side'; return; }
-        const armAngle = smooth(angle(hip, shoulder, wrist));
+        const armRes = angBoth(keypoints, 'hip', 'shoulder', 'wrist');
+        if (!armRes) { debugEl.textContent = 'arm(s) unclear — show your side(s)'; return; }
+        const armAngle = smooth(armRes.value);
         lastAngle = armAngle;
         formIsGood = !(armAngle > 110);
-        formMsg = formIsGood ? '' : 'Dont raise above shoulder';
-        debugEl.textContent = 'ARM:' + Math.round(armAngle) + ' ' + stage + ' reps:' + count;
+        formMsg = formIsGood ? '' : "Don't raise above shoulder";
+        debugEl.textContent = 'ARM:' + Math.round(armAngle) + ' ' + stage + ' reps:' + count + ' sides:' + armRes.sides;
         if (armAngle > 70 && stage === 'up') stage = 'down';
         if (armAngle < 30 && stage === 'down') { stage = 'up'; rep(); }
       },
 
       shoulderpress: function (keypoints) {
-        const shoulder = kp(keypoints, 'left_shoulder');
-        const elbow = kp(keypoints, 'left_elbow');
-        const wrist = kp(keypoints, 'left_wrist');
+        const S = pickSide(keypoints, ['shoulder', 'elbow', 'wrist']);
+        const shoulder = kp(keypoints, S + '_shoulder'), elbow = kp(keypoints, S + '_elbow'), wrist = kp(keypoints, S + '_wrist');
         if (!(shoulder && elbow && wrist)) { debugEl.textContent = 'arm unclear — face camera'; return; }
-        const elbowAngle = smooth(angle(shoulder, elbow, wrist));
+        const elbowAngle = smooth(ang(shoulder, elbow, wrist));
         lastAngle = elbowAngle;
         formIsGood = true; formMsg = '';
-        debugEl.textContent = 'ELBOW:' + Math.round(elbowAngle) + ' ' + stage + ' reps:' + count;
+        debugEl.textContent = 'ELBOW:' + Math.round(elbowAngle) + ' ' + stage + ' reps:' + count + ' side:' + S;
         if (elbowAngle > 150 && stage === 'up') stage = 'down';
         if (elbowAngle < 90 && stage === 'down') { stage = 'up'; rep(); }
       },
 
       jumpingjack: function (keypoints) {
-        const leftWrist = kp(keypoints, 'left_wrist');
-        const rightWrist = kp(keypoints, 'right_wrist');
+        const leftWrist = kp(keypoints, 'left_wrist'), rightWrist = kp(keypoints, 'right_wrist');
         const nose = kp(keypoints, 'nose');
-        const leftAnkle = kp(keypoints, 'left_ankle');
-        const rightAnkle = kp(keypoints, 'right_ankle');
-        const leftHip = kp(keypoints, 'left_hip');
-        const rightHip = kp(keypoints, 'right_hip');
+        const leftAnkle = kp(keypoints, 'left_ankle'), rightAnkle = kp(keypoints, 'right_ankle');
+        const leftHip = kp(keypoints, 'left_hip'), rightHip = kp(keypoints, 'right_hip');
         if (!(leftWrist && rightWrist && nose && leftAnkle && rightAnkle && leftHip && rightHip)) {
           debugEl.textContent = 'show your WHOLE body (head to feet)'; return;
         }
@@ -256,215 +334,164 @@
       },
 
       highknees: function (keypoints) {
-        const leftHip = kp(keypoints, 'left_hip');
-        const rightHip = kp(keypoints, 'right_hip');
-        const leftKnee = kp(keypoints, 'left_knee');
-        const rightKnee = kp(keypoints, 'right_knee');
+        const leftHip = kp(keypoints, 'left_hip'), rightHip = kp(keypoints, 'right_hip');
+        const leftKnee = kp(keypoints, 'left_knee'), rightKnee = kp(keypoints, 'right_knee');
         if (!(leftHip && rightHip && leftKnee && rightKnee)) { debugEl.textContent = 'show your full body'; return; }
         const hipY = (leftHip.y + rightHip.y) / 2;
-        const leftKneeUp = leftKnee.y < hipY + 60;
-        const rightKneeUp = rightKnee.y < hipY + 60;
+        const kneeMargin = 60 * bodyScale;
+        const leftKneeUp = leftKnee.y < hipY + kneeMargin, rightKneeUp = rightKnee.y < hipY + kneeMargin;
         const aKneeIsUp = leftKneeUp || rightKneeUp;
         formIsGood = true; formMsg = '';
-        debugEl.textContent = 'L:' + leftKneeUp + ' R:' + rightKneeUp + ' ' + stage + ' reps:' + count;
+        debugEl.textContent = 'L:' + leftKneeUp + ' R:' + rightKneeUp + ' ' + stage + ' reps:' + count + ' sc:' + bodyScale.toFixed(2);
         if (aKneeIsUp && stage === 'up') stage = 'down';
         if (!aKneeIsUp && stage === 'down') { stage = 'up'; rep(); }
       },
 
+      // BOTH ARMS: averages left+right hip-shoulder-wrist angle when both visible
       frontraise: function (keypoints) {
-        const hip = kp(keypoints, 'left_hip');
-        const shoulder = kp(keypoints, 'left_shoulder');
-        const elbow = kp(keypoints, 'left_elbow');
-        const wrist = kp(keypoints, 'left_wrist');
-        if (!(hip && shoulder && elbow && wrist)) { debugEl.textContent = 'face camera — show your full arm'; return; }
-        const armAngle = smooth(angle(hip, shoulder, wrist));
+        const armRes = angBoth(keypoints, 'hip', 'shoulder', 'wrist');
+        if (!armRes) { debugEl.textContent = 'face camera — show your arm(s)'; return; }
+        const armAngle = smooth(armRes.value);
         lastAngle = armAngle;
-        const elbowAngle = angle(shoulder, elbow, wrist);
+
+        const elbowRes = angBoth(keypoints, 'shoulder', 'elbow', 'wrist');
+        const elbowAngle = elbowRes ? elbowRes.value : 180;
         const armStraight = elbowAngle > 150;
         formIsGood = !(armAngle > 40 && !armStraight);
-        formMsg = formIsGood ? '' : 'Keep your arm straight';
-        debugEl.textContent = 'ARM:' + Math.round(armAngle) + ' ELBOW:' + Math.round(elbowAngle) + ' ' + stage + ' reps:' + count;
+        formMsg = formIsGood ? '' : 'Keep your arm(s) straight';
+        debugEl.textContent = 'ARM:' + Math.round(armAngle) + ' ELBOW:' + Math.round(elbowAngle) + ' ' + stage + ' reps:' + count + ' sides:' + armRes.sides;
         if (armAngle > 70 && stage === 'up') stage = 'down';
         if (armAngle < 30 && stage === 'down') { stage = 'up'; rep(); }
       },
 
+      // BOTH ARMS: averages left+right elbow angle, and left+right body-line, when both visible.
+      // Bilateral by nature — both arms bend together on a real push-up.
       pushup: function (keypoints) {
-        const shoulder = kp(keypoints, 'left_shoulder');
-        const wrist = kp(keypoints, 'left_wrist');
-        const nose = kp(keypoints, 'nose');
-        if (!(shoulder && nose)) { debugEl.textContent = 'show your head & shoulders'; return; }
-        const ref = wrist ? wrist.y : (shoulder.y + 200);
-        const headHeight = smooth(ref - nose.y);
-        lastAngle = headHeight;
-        formIsGood = true; formMsg = '';
-        if (headHeight > headMax) headMax = headHeight;
-        if (headHeight < headMin) headMin = headHeight;
-        const range = headMax - headMin;
-        debugEl.textContent = 'HEAD:' + Math.round(headHeight) + ' [' + Math.round(headMin) + '-' + Math.round(headMax) + '] ' + stage + ' reps:' + count;
-        if (range < 40) { statusEl.textContent = 'Do one full push-up to calibrate'; return; }
-        const downThresh = headMin + range * 0.4;
-        const upThresh = headMax - range * 0.4;
-        if (headHeight < downThresh && stage === 'up') { stage = 'down'; statusEl.textContent = 'UP — push!'; }
-        if (headHeight > upThresh && stage === 'down') { stage = 'up'; rep(); }
+        const elbowRes = angBoth(keypoints, 'shoulder', 'elbow', 'wrist');
+        if (!elbowRes) { debugEl.textContent = 'arm(s) unclear — position the phone so your arms are visible'; return; }
+        const elbowAngle = smooth(elbowRes.value);
+        lastAngle = elbowAngle;
+
+        const bodyRes = angBoth(keypoints, 'shoulder', 'hip', 'knee');
+        const bodyLine = bodyRes ? bodyRes.value : 180;
+        formIsGood = !(bodyRes && bodyLine < 150);
+        formMsg = formIsGood ? '' : 'Keep your body straight — engage your core';
+
+        debugEl.textContent = 'ELBOW:' + Math.round(elbowAngle) + ' BODYLINE:' + Math.round(bodyLine) + ' ' + stage + ' reps:' + count + ' sides:' + elbowRes.sides;
+
+        if (elbowAngle < 100 && stage === 'up') stage = 'down';
+        if (elbowAngle > 160 && stage === 'down') { stage = 'up'; rep(); }
       },
 
       sidelegraise: function (keypoints) {
-        const leftAnkle = kp(keypoints, 'left_ankle');
-        const rightAnkle = kp(keypoints, 'right_ankle');
+        const leftAnkle = kp(keypoints, 'left_ankle'), rightAnkle = kp(keypoints, 'right_ankle');
         if (!(leftAnkle && rightAnkle)) { debugEl.textContent = 'show both feet'; return; }
         const diff = leftAnkle.y - rightAnkle.y;
         const liftHeight = Math.abs(diff);
         const whichLeg = diff < 0 ? 'LEFT' : 'RIGHT';
-        const raised = liftHeight > 60;
+        const raised = liftHeight > 60 * bodyScale;
+        const lowered = liftHeight < 30 * bodyScale;
         formIsGood = true; formMsg = '';
-        debugEl.textContent = 'LIFT:' + Math.round(liftHeight) + ' (' + whichLeg + ') ' + stage + ' reps:' + count;
+        debugEl.textContent = 'LIFT:' + Math.round(liftHeight) + ' (' + whichLeg + ') ' + stage + ' reps:' + count + ' sc:' + bodyScale.toFixed(2);
         if (raised && stage === 'up') { stage = 'down'; statusEl.textContent = 'Lower your leg'; statusEl.style.color = '#5DCAA5'; }
-        if (liftHeight < 30 && stage === 'down') { stage = 'up'; rep(); }
+        if (lowered && stage === 'down') { stage = 'up'; rep(); }
       },
 
       kneeraise: function (keypoints) {
-        const leftHip = kp(keypoints, 'left_hip');
-        const rightHip = kp(keypoints, 'right_hip');
-        const leftKnee = kp(keypoints, 'left_knee');
-        const rightKnee = kp(keypoints, 'right_knee');
-        if (!(leftHip && rightHip)) { debugEl.textContent = 'show your full body'; return; }
-        const hipY = (leftHip.y + rightHip.y) / 2;
-        let workingKnee = null;
-        if (leftKnee && rightKnee) workingKnee = leftKnee.score >= rightKnee.score ? leftKnee : rightKnee;
-        else workingKnee = leftKnee || rightKnee;
-        if (!workingKnee) { debugEl.textContent = 'leg not visible'; return; }
+        const leftHip = kp(keypoints, 'left_hip'), rightHip = kp(keypoints, 'right_hip');
+        const leftKnee = kp(keypoints, 'left_knee'), rightKnee = kp(keypoints, 'right_knee');
+        const hips = [leftHip, rightHip].filter(Boolean);
+        if (!hips.length) { debugEl.textContent = 'show your full body'; return; }
+        const hipY = hips.reduce((t, h) => t + h.y, 0) / hips.length;
+        const knees = [leftKnee, rightKnee].filter(Boolean);
+        if (!knees.length) { debugEl.textContent = 'leg not visible'; return; }
+        const workingKnee = knees.reduce((a, b) => (a.y <= b.y ? a : b));
         const kneeToHip = workingKnee.y - hipY;
-        const raised = kneeToHip < 50;
-        const down = kneeToHip > 90;
+        const raised = kneeToHip < 50 * bodyScale;
+        const down = kneeToHip > 90 * bodyScale;
         formIsGood = true; formMsg = '';
-        debugEl.textContent = 'KNEE-HIP:' + Math.round(kneeToHip) + ' conf:' + Math.round(workingKnee.score*100) + '% ' + stage + ' reps:' + count;
+        debugEl.textContent = 'KNEE-HIP:' + Math.round(kneeToHip) + ' vis:' + Math.round(workingKnee.score * 100) + '% ' + stage + ' reps:' + count + ' sc:' + bodyScale.toFixed(2);
         if (raised && stage === 'up') { stage = 'down'; statusEl.textContent = 'Lower'; statusEl.style.color = '#5DCAA5'; }
         if (down && stage === 'down') { stage = 'up'; rep(); }
       },
 
       tricepextension: function (keypoints) {
-        const shoulder = kp(keypoints, 'left_shoulder');
-        const elbow = kp(keypoints, 'left_elbow');
-        const wrist = kp(keypoints, 'left_wrist');
+        const S = pickSide(keypoints, ['shoulder', 'elbow', 'wrist']);
+        const shoulder = kp(keypoints, S + '_shoulder'), elbow = kp(keypoints, S + '_elbow'), wrist = kp(keypoints, S + '_wrist');
         if (!(shoulder && elbow && wrist)) { debugEl.textContent = 'show your arm overhead'; return; }
-        const elbowAngle = smooth(angle(shoulder, elbow, wrist));
+        const elbowAngle = smooth(ang(shoulder, elbow, wrist));
         lastAngle = elbowAngle;
         formIsGood = true; formMsg = '';
-        debugEl.textContent = 'ELBOW:' + Math.round(elbowAngle) + ' ' + stage + ' reps:' + count;
+        debugEl.textContent = 'ELBOW:' + Math.round(elbowAngle) + ' ' + stage + ' reps:' + count + ' side:' + S;
         if (elbowAngle > 150 && stage === 'up') stage = 'down';
         if (elbowAngle < 90 && stage === 'down') { stage = 'up'; rep(); }
       },
 
       sumosquat: function (keypoints) {
-        const hip = kp(keypoints, 'left_hip');
-        const knee = kp(keypoints, 'left_knee');
-        const ankle = kp(keypoints, 'left_ankle');
-        const shoulder = kp(keypoints, 'left_shoulder');
+        const S = pickSide(keypoints, ['hip', 'knee', 'ankle']);
+        const hip = kp(keypoints, S + '_hip'), knee = kp(keypoints, S + '_knee');
+        const ankle = kp(keypoints, S + '_ankle'), shoulder = kp(keypoints, S + '_shoulder');
         if (!(hip && knee && ankle)) { debugEl.textContent = 'show your legs'; return; }
-        const kneeAngle = smooth(angle(hip, knee, ankle));
+        const kneeAngle = smooth(ang(hip, knee, ankle));
         lastAngle = kneeAngle;
-        const backAngle = shoulder ? angle(shoulder, hip, knee) : 180;
+        const backAngle = shoulder ? ang(shoulder, hip, knee) : 180;
         formIsGood = !(stage === 'down' && backAngle <= 45);
         formMsg = formIsGood ? '' : 'Keep your back upright';
-        debugEl.textContent = 'KNEE:' + Math.round(kneeAngle) + ' BACK:' + Math.round(backAngle) + ' ' + stage + ' reps:' + count;
+        debugEl.textContent = 'KNEE:' + Math.round(kneeAngle) + ' BACK:' + Math.round(backAngle) + ' ' + stage + ' reps:' + count + ' side:' + S;
         countRep(kneeAngle, 130, 150);
       },
 
       sidebend: function (keypoints) {
-        const leftShoulder = kp(keypoints, 'left_shoulder');
-        const rightShoulder = kp(keypoints, 'right_shoulder');
-        const leftHip = kp(keypoints, 'left_hip');
-        const rightHip = kp(keypoints, 'right_hip');
+        const leftShoulder = kp(keypoints, 'left_shoulder'), rightShoulder = kp(keypoints, 'right_shoulder');
+        const leftHip = kp(keypoints, 'left_hip'), rightHip = kp(keypoints, 'right_hip');
         if (!(leftShoulder && rightShoulder && leftHip && rightHip)) { debugEl.textContent = 'show your upper body'; return; }
         const shoulderTilt = Math.abs(leftShoulder.y - rightShoulder.y);
         const hipWidth = Math.abs(leftHip.x - rightHip.x);
         const tiltRatio = hipWidth > 0 ? shoulderTilt / hipWidth : 0;
         const smoothedTilt = smooth(tiltRatio * 100);
-        const bent = smoothedTilt > 40;
-        const upright = smoothedTilt < 20;
+        const bent = smoothedTilt > 40, upright = smoothedTilt < 20;
         formIsGood = true; formMsg = '';
         debugEl.textContent = 'TILT:' + Math.round(smoothedTilt) + ' need>40 ' + stage + ' reps:' + count;
         if (bent && stage === 'up') { stage = 'down'; statusEl.textContent = 'Back to center'; statusEl.style.color = '#5DCAA5'; }
         if (upright && stage === 'down') { stage = 'up'; rep(); }
       },
 
-      // CONVENTIONAL DEADLIFT — 45° side view, auto-detects best side
-      // primary: back angle (shoulder-hip-knee) drops on hinge, rises on lockout
-      // form check: back rounding (shoulder drops below hip level during hinge)
-     deadlift: function (keypoints) {
-      const leftShoulder = kp(keypoints, 'left_shoulder');
-      const rightShoulder = kp(keypoints, 'right_shoulder');
-      const leftHip = kp(keypoints, 'left_hip');
-      const rightHip = kp(keypoints, 'right_hip');
-      const leftKnee = kp(keypoints, 'left_knee');
-      const rightKnee = kp(keypoints, 'right_knee');
-      const leftAnkle = kp(keypoints, 'left_ankle');
-      const rightAnkle = kp(keypoints, 'right_ankle');
-
-      // auto-pick best side
-      const leftConf = (leftShoulder?.score||0)+(leftHip?.score||0)+(leftKnee?.score||0);
-      const rightConf = (rightShoulder?.score||0)+(rightHip?.score||0)+(rightKnee?.score||0);
-      const useSide = leftConf >= rightConf ? 'left' : 'right';
-
-      const shoulder = useSide==='left' ? leftShoulder : rightShoulder;
-      const hip      = useSide==='left' ? leftHip      : rightHip;
-      const knee     = useSide==='left' ? leftKnee     : rightKnee;
-      const ankle    = useSide==='left' ? leftAnkle    : rightAnkle;
-
-      if (!(shoulder && hip && knee && ankle)) {
-        debugEl.textContent = 'stand at 45° — show full body';
-        return;
-      }
-
-      // PRIMARY: back angle (shoulder→hip→knee)
-      const backAngle = smooth(angle(shoulder, hip, knee));
-      // SECONDARY: knee angle (hip→knee→ankle) — confirms knee bend
-      const kneeAngle = smooth(angle(hip, knee, ankle));
-      // TERTIARY: hip position relative to standing — did hips actually drop?
-      // we track the hip Y position at standing and check it drops during hinge
-      lastAngle = backAngle;
-
-      // FORM: back rounding during hinge
-      const backRounded = stage === 'down' && shoulder.y > hip.y + 40;
-      formIsGood = !backRounded;
-      formMsg = backRounded ? 'Keep your back flat' : '';
-
-      debugEl.textContent = 'BACK:' + Math.round(backAngle) +
-        ' KNEE:' + Math.round(kneeAngle) +
-        ' side:' + useSide + ' ' + stage + ' reps:' + count;
-
-      // GATED DOWN: requires BOTH back angle low AND knee bent
-      // prevents casual bending or arm waving from triggering
-      const realHinge = backAngle < 110 && kneeAngle < 150;
-
-      // GATED UP: requires BOTH back angle high AND knees extended
-      const realLockout = backAngle > 155 && kneeAngle > 160;
-
-      if (realHinge && stage === 'up') {
-        stage = 'down';
-        statusEl.textContent = 'Drive up!';
-        statusEl.style.color = '#5DCAA5';
-      }
-
-      if (realLockout && stage === 'down') {
-        stage = 'up';
-        rep();
-      }
-    },
+      deadlift: function (keypoints) {
+        const S = pickSide(keypoints, ['shoulder', 'hip', 'knee']);
+        const shoulder = kp(keypoints, S + '_shoulder'), hip = kp(keypoints, S + '_hip');
+        const knee = kp(keypoints, S + '_knee'), ankle = kp(keypoints, S + '_ankle');
+        if (!(shoulder && hip && knee && ankle)) { debugEl.textContent = 'stand at 45° — show full body'; return; }
+        const backAngle = smooth(ang(shoulder, hip, knee));
+        const kneeAngle = smooth(ang(hip, knee, ankle));
+        lastAngle = backAngle;
+        const backRounded = stage === 'down' && shoulder.y > hip.y + 40 * bodyScale;
+        formIsGood = !backRounded;
+        formMsg = backRounded ? 'Keep your back flat' : '';
+        debugEl.textContent = 'BACK:' + Math.round(backAngle) + ' KNEE:' + Math.round(kneeAngle) +
+          ' side:' + S + ' ' + stage + ' reps:' + count;
+        const realHinge = backAngle < 110 && kneeAngle < 150;
+        const realLockout = backAngle > 155 && kneeAngle > 160;
+        if (realHinge && stage === 'up') { stage = 'down'; statusEl.textContent = 'Drive up!'; statusEl.style.color = '#5DCAA5'; }
+        if (realLockout && stage === 'down') { stage = 'up'; rep(); }
+      },
     };
 
-
     async function detectOnce() {
-      const poses = await detector.estimatePoses(video);
+      if (video.currentTime === lastVideoTime) return;
+      lastVideoTime = video.currentTime;
+      const res = detector.detectForVideo(video, performance.now());
+      frameCount++;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      if (poses.length > 0) {
-        const keypoints = poses[0].keypoints;
+      if (res.landmarks && res.landmarks.length > 0) {
+        const world = res.worldLandmarks && res.worldLandmarks[0];
+        const keypoints = toKeypoints(res.landmarks[0], world, video.videoWidth, video.videoHeight);
+        updateBodyScale(keypoints);
         const detect = EXERCISES[exercise];
         if (detect) detect(keypoints);
         else debugEl.textContent = 'Unknown exercise: ' + exercise;
 
         const drawKeypoints = keypoints.map(smoothKp);
-        const color = formIsGood ? '#1D9E75' : '#E24B4A';
+        const color = SKELETON_COLOR;
 
         if (formIsGood) {
           formBorder.style.borderColor = 'rgba(29,158,117,0.55)';
@@ -499,7 +526,9 @@
         });
 
         ctx.shadowBlur = 0;
-        send({ type: 'form', good: formIsGood, msg: formMsg });
+        sendFormIfChanged();
+      } else {
+        debugEl.textContent = 'no person detected — step into frame';
       }
     }
 
@@ -514,9 +543,6 @@
       requestAnimationFrame(loop);
     }
 
-    // --- 15-second pre-start countdown ---
-    // Shows once the camera + model are ready, so the user has time to
-    // position themselves before rep counting (the AR loop) begins.
     function startCountdown(seconds, onDone) {
       const overlay = document.getElementById('countdownOverlay');
       const ring = document.getElementById('countdownRing');
@@ -536,7 +562,7 @@
           numberEl.textContent = remaining;
           ring.style.setProperty('--progress', Math.round((remaining / seconds) * 360) + 'deg');
           numberEl.classList.remove('pulse');
-          void numberEl.offsetWidth; // restart the pulse animation each tick
+          void numberEl.offsetWidth;
           numberEl.classList.add('pulse');
           send({ type: 'countdown', seconds: remaining, total: seconds });
         } else {
@@ -554,6 +580,31 @@
       }, 1000);
     }
 
+    function showFatal(err) {
+      const name = err && err.name;
+      const text = (err && err.message) || '';
+      let msg;
+      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+        msg = 'Camera permission is blocked. Allow camera access and reopen.';
+      } else if (name === 'NotFoundError') {
+        msg = 'No camera was found on this device.';
+      } else if (text === 'MODEL_LOAD_TIMEOUT' || /fetch|import|network|load/i.test(text)) {
+        msg = "Couldn't load the AI model. Check your internet connection and reopen.";
+      } else {
+        msg = "Couldn't start the AR camera. Check your internet connection and try again.";
+      }
+      statusEl.textContent = msg;
+      statusEl.style.color = '#E24B4A';
+      debugEl.textContent = text ? 'Error: ' + text : '';
+      send({ type: 'error', message: msg });
+    }
+
+    function withTimeout(promise, ms, message) {
+      let timer;
+      const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); });
+      return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+    }
+
     async function init() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -562,19 +613,34 @@
         video.srcObject = stream;
         await new Promise(r => { video.onloadedmetadata = r; });
         canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-        await tf.ready();
-        detector = await poseDetection.createDetector(
-          poseDetection.SupportedModels.MoveNet,
-          { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING }
-        );
+
+        const setup = async () => {
+          const { PoseLandmarker, FilesetResolver } = await import(MP + '/vision_bundle.mjs');
+          const fileset = await FilesetResolver.forVisionTasks(MP + '/wasm');
+          const make = delegate => PoseLandmarker.createFromOptions(fileset, {
+            baseOptions: { modelAssetPath: MODEL_URL, delegate },
+            runningMode: 'VIDEO',
+            numPoses: 1,
+            minPoseDetectionConfidence: 0.5,
+            minPosePresenceConfidence: 0.5,
+            minTrackingConfidence: 0.5,
+          });
+          try { delegateName = 'GPU'; return await make('GPU'); }
+          catch (e) { delegateName = 'CPU'; return await make('CPU'); }
+        };
+        detector = await withTimeout(setup(), MODEL_LOAD_TIMEOUT_MS, 'MODEL_LOAD_TIMEOUT');
+
+        await new Promise(r => { if (video.readyState >= 2) r(); else video.onloadeddata = r; });
+        try { detector.detectForVideo(video, performance.now()); } catch (e) { /* real frames will retry */ }
+
         statusEl.textContent = 'Get into position';
-        startCountdown(15, () => {
+        startCountdown(5, () => {
           statusEl.textContent = 'Go!';
           statusEl.style.color = '#5DCAA5';
           requestAnimationFrame(loop);
         });
       } catch (err) {
-        debugEl.textContent = 'Error: ' + err.message;
+        showFatal(err);
       }
     }
     init();
