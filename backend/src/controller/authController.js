@@ -4,6 +4,10 @@ import { isAllowedEmail, normalizeEmail } from "../utils/emailValidator.js";
 import nodemailer from "nodemailer";
 import crypto from "crypto";
 
+const CODE_EXPIRY_MS = 15 * 60 * 1000; // 15 minutes
+const RESEND_COOLDOWN_MS = 60 * 1000; // 60 seconds between emails
+const MAX_CODE_ATTEMPTS = 5; // wrong guesses allowed per code
+
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
@@ -11,6 +15,19 @@ const transporter = nodemailer.createTransport({
     pass: process.env.GMAIL_PASS,
   },
 });
+
+// ---------- helpers ----------
+
+const generateCode = () => crypto.randomInt(100000, 1000000).toString();
+
+const hashCode = (code) =>
+  crypto.createHash("sha256").update(String(code).trim()).digest("hex");
+
+const cooldownSecondsLeft = (lastSentAt) => {
+  if (!lastSentAt) return 0;
+  const left = RESEND_COOLDOWN_MS - (Date.now() - new Date(lastSentAt).getTime());
+  return left > 0 ? Math.ceil(left / 1000) : 0;
+};
 
 function verificationEmailHtml(code) {
   return `
@@ -25,6 +42,33 @@ function verificationEmailHtml(code) {
     </div>
   `;
 }
+
+function resetEmailHtml(code) {
+  return `
+    <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 32px; background: #f7f7f7; border-radius: 12px;">
+      <h2 style="color: #111111; margin-bottom: 8px;">Password Reset</h2>
+      <p style="color: #555; margin-bottom: 24px;">You requested a password reset for your VisionFIT360 account.</p>
+      <div style="background: #ffffff; border-radius: 10px; padding: 24px; text-align: center; margin-bottom: 24px;">
+        <p style="color: #888; font-size: 13px; margin-bottom: 8px;">YOUR RESET CODE</p>
+        <p style="font-size: 36px; font-weight: 900; letter-spacing: 8px; color: #111111; margin: 0;">${code}</p>
+      </div>
+      <p style="color: #888; font-size: 13px; text-align: center;">This code expires in <strong>15 minutes</strong>.</p>
+      <p style="color: #bbb; font-size: 12px; text-align: center; margin-top: 24px;">If you didn't request this, you can safely ignore this email.</p>
+    </div>
+  `;
+}
+
+// Sets a fresh verification code on the user doc (caller must save)
+function issueVerificationCode(user) {
+  const code = generateCode();
+  user.verificationCode = hashCode(code);
+  user.verificationCodeExpiry = new Date(Date.now() + CODE_EXPIRY_MS);
+  user.verificationAttempts = 0;
+  user.verificationSentAt = new Date();
+  return code;
+}
+
+
 
 export const register = async (req, res) => {
   try {
@@ -61,6 +105,16 @@ export const register = async (req, res) => {
       return res.status(400).json({ message: "Email already exists" });
     }
 
+    // stop people from spamming an inbox by re-registering the same unverified email
+    if (existingEmail) {
+      const wait = cooldownSecondsLeft(existingEmail.verificationSentAt);
+      if (wait > 0) {
+        return res.status(429).json({
+          message: `Please wait ${wait} seconds before requesting another code.`,
+        });
+      }
+    }
+
     const existingUsername = await User.findOne({ username });
     // block on username collision, unless it's literally the same unverified record we're about to reuse
     if (
@@ -80,10 +134,7 @@ export const register = async (req, res) => {
       user = new User({ email: normalizedEmail, username, password });
     }
 
-    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
-    user.verificationCode = crypto.createHash("sha256").update(verificationCode).digest("hex");
-    user.verificationCodeExpiry = new Date(Date.now() + 15 * 60 * 1000);
-
+    const verificationCode = issueVerificationCode(user);
     await user.save();
 
     console.log("Sending verification email to:", user.email);
@@ -122,13 +173,24 @@ export const verifyEmail = async (req, res) => {
     if (!user.verificationCodeExpiry || user.verificationCodeExpiry < new Date())
       return res.status(400).json({ message: "Verification code has expired. Please request a new one." });
 
-    const hashedCode = crypto.createHash("sha256").update(verificationCode.trim()).digest("hex");
-    if (user.verificationCode !== hashedCode)
+    // too many wrong guesses -> this code is dead, user must request a new one
+    if ((user.verificationAttempts || 0) >= MAX_CODE_ATTEMPTS) {
+      return res.status(429).json({
+        message: "Too many incorrect attempts. Please request a new code.",
+      });
+    }
+
+    const hashedCode = hashCode(verificationCode);
+    if (user.verificationCode !== hashedCode) {
+      user.verificationAttempts = (user.verificationAttempts || 0) + 1;
+      await user.save();
       return res.status(400).json({ message: "Invalid verification code" });
+    }
 
     user.isVerified = true;
     user.verificationCode = "";
     user.verificationCodeExpiry = null;
+    user.verificationAttempts = 0;
 
     const token = generateToken(user._id);
     user.currentToken = token;
@@ -165,9 +227,14 @@ export const resendVerificationCode = async (req, res) => {
     if (user.isVerified)
       return res.status(400).json({ message: "Account is already verified" });
 
-    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
-    user.verificationCode = crypto.createHash("sha256").update(verificationCode).digest("hex");
-    user.verificationCodeExpiry = new Date(Date.now() + 15 * 60 * 1000);
+    const wait = cooldownSecondsLeft(user.verificationSentAt);
+    if (wait > 0) {
+      return res.status(429).json({
+        message: `Please wait ${wait} seconds before requesting another code.`,
+      });
+    }
+
+    const verificationCode = issueVerificationCode(user);
     await user.save();
 
     console.log("Resending verification email to:", user.email);
@@ -226,8 +293,6 @@ export const login = async (req, res) => {
   }
 };
 
-
-
 export const forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
@@ -235,18 +300,26 @@ export const forgotPassword = async (req, res) => {
     if (!email)
       return res.status(400).json({ message: "Email is required" });
 
+    const genericReply = {
+      message: "If that email is registered, a reset code has been sent.",
+    };
+
     const user = await User.findOne({ email: normalizeEmail(email) });
     if (!user) {
-      return res.status(200).json({
-        message: "If that email is registered, a reset code has been sent.",
-      });
+      return res.status(200).json(genericReply);
     }
 
-    const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiry = new Date(Date.now() + 15 * 60 * 1000);
+    // silently ignore requests inside the cooldown (also avoids revealing account existence)
+    if (cooldownSecondsLeft(user.resetSentAt) > 0) {
+      return res.status(200).json(genericReply);
+    }
 
-    user.resetToken = crypto.createHash("sha256").update(resetCode).digest("hex");
-    user.resetTokenExpiry = expiry;
+    const resetCode = generateCode();
+
+    user.resetToken = hashCode(resetCode);
+    user.resetTokenExpiry = new Date(Date.now() + CODE_EXPIRY_MS);
+    user.resetAttempts = 0;
+    user.resetSentAt = new Date();
     await user.save();
 
     console.log("Sending reset email to:", user.email);
@@ -255,18 +328,7 @@ export const forgotPassword = async (req, res) => {
       from: `"VisionFIT360" <${process.env.GMAIL_USER}>`,
       to: user.email,
       subject: "VisionFIT360 — Your Password Reset Code",
-      html: `
-        <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 32px; background: #f7f7f7; border-radius: 12px;">
-          <h2 style="color: #111111; margin-bottom: 8px;">Password Reset</h2>
-          <p style="color: #555; margin-bottom: 24px;">You requested a password reset for your VisionFIT360 account.</p>
-          <div style="background: #ffffff; border-radius: 10px; padding: 24px; text-align: center; margin-bottom: 24px;">
-            <p style="color: #888; font-size: 13px; margin-bottom: 8px;">YOUR RESET CODE</p>
-            <p style="font-size: 36px; font-weight: 900; letter-spacing: 8px; color: #111111; margin: 0;">${resetCode}</p>
-          </div>
-          <p style="color: #888; font-size: 13px; text-align: center;">This code expires in <strong>15 minutes</strong>.</p>
-          <p style="color: #bbb; font-size: 12px; text-align: center; margin-top: 24px;">If you didn't request this, you can safely ignore this email.</p>
-        </div>
-      `,
+      html: resetEmailHtml(resetCode),
     });
 
     res.status(200).json({
@@ -287,6 +349,8 @@ export const resetPassword = async (req, res) => {
 
     if (newPassword.length < 8)
       return res.status(400).json({ message: "Password must be at least 8 characters long" });
+    if (newPassword.length > 64)
+      return res.status(400).json({ message: "Password must be 64 characters or less" });
     if (!/[a-zA-Z]/.test(newPassword))
       return res.status(400).json({ message: "Password must include at least one letter" });
     if (!/[0-9]/.test(newPassword))
@@ -299,13 +363,23 @@ export const resetPassword = async (req, res) => {
     if (!user.resetTokenExpiry || user.resetTokenExpiry < new Date())
       return res.status(400).json({ message: "Reset code has expired. Please request a new one." });
 
-    const hashedCode = crypto.createHash("sha256").update(resetCode.trim()).digest("hex");
-    if (user.resetToken !== hashedCode)
+    if ((user.resetAttempts || 0) >= MAX_CODE_ATTEMPTS) {
+      return res.status(429).json({
+        message: "Too many incorrect attempts. Please request a new code.",
+      });
+    }
+
+    const hashedCode = hashCode(resetCode);
+    if (user.resetToken !== hashedCode) {
+      user.resetAttempts = (user.resetAttempts || 0) + 1;
+      await user.save();
       return res.status(400).json({ message: "Invalid reset code" });
+    }
 
     user.password = newPassword;
     user.resetToken = "";
     user.resetTokenExpiry = null;
+    user.resetAttempts = 0;
     user.currentToken = "";
     await user.save();
 

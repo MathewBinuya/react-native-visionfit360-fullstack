@@ -1,24 +1,23 @@
 const ALLOWED = new Set(["gmail.com", "outlook.com", "yahoo.com"]);
 
-function getDomain(email) {
-  return String(email).trim().toLowerCase().split("@")[1] || "";
-}
-
 export function isAllowedEmail(email) {
-  return ALLOWED.has(getDomain(email));
+  const parts = String(email).trim().toLowerCase().split("@");
+  if (parts.length !== 2 || !parts[0]) return false;
+  return ALLOWED.has(parts[1]);
 }
 
-// Gmail: ignores dots and +tags. Outlook: ignores +tags. Yahoo: trim + lowercase only.
 export function normalizeEmail(email) {
   const clean = String(email).trim().toLowerCase();
-  const [local, domain] = clean.split("@");
+  let [local, domain] = clean.split("@");
   if (!local || !domain) return clean;
 
   if (domain === "gmail.com") {
-    return `${local.split("+")[0].replace(/\./g, "")}@gmail.com`;
+    // Gmail ignores dots and everything after "+"
+    local = local.split("+")[0].replace(/\./g, "");
   }
-  if (domain === "outlook.com") {
-    return `${local.split("+")[0]}@outlook.com`;
-  }
-  return clean;
+
+  return `${local}@${domain}`;
 }
+
+export const EMAIL_DOMAIN_ERROR =
+  "Please use a Gmail, Outlook, or Yahoo email address";
