@@ -1,7 +1,5 @@
 import { View, 
          Text, 
-         StyleSheet, 
-         Dimensions,
          TextInput,
          KeyboardAvoidingView,
          ActivityIndicator,
@@ -18,21 +16,65 @@ import api from '../../lib/axios';
 
 const GENDER_OPTIONS = ["male", "female", "other"];
 
+// realistic limits so people can't enter nonsense like 0 or 99999
+const HEIGHT_MIN = 50, HEIGHT_MAX = 250;
+const WEIGHT_MIN = 20, WEIGHT_MAX = 300;
+
 export default function Profile() {
   const [form, setForm] = useState({ name: "", bio: "", gender: "", heightCm: "", weightKg: "" });
+  const [isSaving, setIsSaving] = useState(false);
+
+  const height = Number(form.heightCm);
+  const weight = Number(form.weightKg);
+
+  // every field must be filled in (whitespace-only doesn't count)
+  const isComplete =
+    form.name.trim() !== "" &&
+    form.bio.trim() !== "" &&
+    form.gender !== "" &&
+    form.heightCm !== "" &&
+    form.weightKg !== "";
+
+  // returns an error message, or null if everything is valid
+  const validate = () => {
+    if (!form.name.trim()) return "Please enter your name";
+    if (!form.bio.trim()) return "Please tell us a little about yourself";
+    if (!form.gender) return "Please select your gender";
+    if (!form.heightCm) return "Please enter your height";
+    if (isNaN(height) || height < HEIGHT_MIN || height > HEIGHT_MAX)
+      return `Height must be between ${HEIGHT_MIN} and ${HEIGHT_MAX} cm`;
+    if (!form.weightKg) return "Please enter your weight";
+    if (isNaN(weight) || weight < WEIGHT_MIN || weight > WEIGHT_MAX)
+      return `Weight must be between ${WEIGHT_MIN} and ${WEIGHT_MAX} kg`;
+    return null;
+  };
+
+  // allow only digits (and one decimal point for weight)
+  const onlyNumber = (text, allowDecimal = false) => {
+    const pattern = allowDecimal ? /[^0-9.]/g : /[^0-9]/g;
+    let cleaned = text.replace(pattern, "");
+    if (allowDecimal) {
+      const [whole, ...rest] = cleaned.split(".");
+      cleaned = rest.length ? `${whole}.${rest.join("")}` : whole;
+    }
+    return cleaned;
+  };
 
   const handleContinue = async () => {
-    if (!form.name) {
-      Alert.alert("Hold on", "Please enter your name");
+    const error = validate();
+    if (error) {
+      Alert.alert("Hold on", error);
       return;
     }
+
+    setIsSaving(true);
     try {
       await api.put("/profile", {
-        name: form.name,
-        bio: form.bio,
+        name: form.name.trim(),
+        bio: form.bio.trim(),
         gender: form.gender,
-        heightCm: form.heightCm ? Number(form.heightCm) : undefined,
-        weightKg: form.weightKg ? Number(form.weightKg) : undefined,
+        heightCm: height,
+        weightKg: weight,
       });
       router.push("/(onBoarding)/bmi");
     } catch (error) {
@@ -40,6 +82,8 @@ export default function Profile() {
       console.log("DATA:", error.response?.data);
       console.log("MESSAGE:", error.message);
       Alert.alert("Error", error.response?.data?.message || "Failed to save");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -65,6 +109,7 @@ export default function Profile() {
                   placeholderTextColor={COLORS.placeholderText}
                   value={form.name}
                   onChangeText={(t) => setForm({ ...form, name: t })}
+                  maxLength={50}
                 />
               </View>
             </View>
@@ -79,6 +124,7 @@ export default function Profile() {
                   placeholderTextColor={COLORS.placeholderText}
                   value={form.bio}
                   onChangeText={(t) => setForm({ ...form, bio: t })}
+                  maxLength={150}
                 />
               </View>
             </View>
@@ -119,8 +165,9 @@ export default function Profile() {
                     placeholder="175"
                     placeholderTextColor={COLORS.placeholderText}
                     value={form.heightCm}
-                    onChangeText={(t) => setForm({ ...form, heightCm: t })}
+                    onChangeText={(t) => setForm({ ...form, heightCm: onlyNumber(t) })}
                     keyboardType="numeric"
+                    maxLength={3}
                   />
                 </View>
               </View>
@@ -132,22 +179,28 @@ export default function Profile() {
                     placeholder="70"
                     placeholderTextColor={COLORS.placeholderText}
                     value={form.weightKg}
-                    onChangeText={(t) => setForm({ ...form, weightKg: t })}
+                    onChangeText={(t) => setForm({ ...form, weightKg: onlyNumber(t, true) })}
                     keyboardType="numeric"
+                    maxLength={6}
                   />
                 </View>
               </View>
             </View>
           </View>
 
-          <TouchableOpacity style={styles.button} onPress={handleContinue}>
-            <Text style={styles.buttonText}>Continue</Text>
+          <TouchableOpacity
+            style={[styles.button, (!isComplete || isSaving) && { opacity: 0.6 }]}
+            onPress={handleContinue}
+            disabled={isSaving}
+          >
+            {isSaving ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>Continue</Text>
+            )}
           </TouchableOpacity>
         </View>
       </View>
     </KeyboardAvoidingView>
   );
 }
-
-
-

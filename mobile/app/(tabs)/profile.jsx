@@ -139,9 +139,24 @@ export default function Profile() {
     }
   };
 
-  const handleLogout = async () => {
-    await logout();
-    router.replace("/(auth)");
+  // asks for confirmation before logging out
+  const handleLogout = () => {
+    Alert.alert(
+      "Log out",
+      "Are you sure you want to log out?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Logout",
+          style: "destructive",
+          onPress: async () => {
+            await logout();
+            router.replace("/(auth)");
+          },
+        },
+      ],
+      { cancelable: true }
+    );
   };
 
   if (loading) {
