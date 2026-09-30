@@ -1,29 +1,24 @@
-const GMAIL = ["gmail.com", "googlemail.com"];
-const MICROSOFT = ["outlook.com", "hotmail.com", "live.com", "msn.com", "outlook.ph"];
-const YAHOO = ["yahoo.com", "ymail.com", "rocketmail.com"];
-
-const ALLOWED = new Set([...GMAIL, ...MICROSOFT, ...YAHOO]);
-const YAHOO_REGIONAL = /^yahoo\.[a-z]{2,3}(\.[a-z]{2})?$/;
+const ALLOWED = new Set(["gmail.com", "outlook.com", "yahoo.com"]);
 
 function getDomain(email) {
   return String(email).trim().toLowerCase().split("@")[1] || "";
 }
 
 export function isAllowedEmail(email) {
-  const domain = getDomain(email);
-  return ALLOWED.has(domain) || YAHOO_REGIONAL.test(domain);
+  return ALLOWED.has(getDomain(email));
 }
 
+// Gmail: ignores dots and +tags. Outlook: ignores +tags. Yahoo: trim + lowercase only.
 export function normalizeEmail(email) {
   const clean = String(email).trim().toLowerCase();
   const [local, domain] = clean.split("@");
   if (!local || !domain) return clean;
 
-  if (GMAIL.includes(domain)) {
+  if (domain === "gmail.com") {
     return `${local.split("+")[0].replace(/\./g, "")}@gmail.com`;
   }
-  if (MICROSOFT.includes(domain)) {
-    return `${local.split("+")[0]}@${domain}`;
+  if (domain === "outlook.com") {
+    return `${local.split("+")[0]}@outlook.com`;
   }
   return clean;
 }

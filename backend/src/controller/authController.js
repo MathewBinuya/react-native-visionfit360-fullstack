@@ -1,5 +1,6 @@
 import User from "../models/user.model.js";
 import generateToken from "../utils/generateToken.js";
+import { isAllowedEmail, normalizeEmail } from "../utils/emailValidator.js";
 import nodemailer from "nodemailer";
 import crypto from "crypto";
 
@@ -47,7 +48,13 @@ export const register = async (req, res) => {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
       return res.status(400).json({ message: "Please enter a valid email address" });
 
-    const existingEmail = await User.findOne({ email: email.trim().toLowerCase() });
+    // only Gmail / Outlook / Yahoo allowed (blocks temp-mail and other disposable domains)
+    if (!isAllowedEmail(email))
+      return res.status(400).json({ message: "Please use a Gmail, Outlook, or Yahoo email address" });
+
+    const normalizedEmail = normalizeEmail(email);
+
+    const existingEmail = await User.findOne({ email: normalizedEmail });
 
     // only block if that email belongs to an already-verified account
     if (existingEmail && existingEmail.isVerified) {
@@ -70,7 +77,7 @@ export const register = async (req, res) => {
       existingEmail.password = password; // pre-save hook re-hashes since password is modified
       user = existingEmail;
     } else {
-      user = new User({ email: email.trim().toLowerCase(), username, password });
+      user = new User({ email: normalizedEmail, username, password });
     }
 
     const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
@@ -105,7 +112,7 @@ export const verifyEmail = async (req, res) => {
     if (!email || !verificationCode)
       return res.status(400).json({ message: "Email and verification code are required" });
 
-    const user = await User.findOne({ email: email.trim().toLowerCase() });
+    const user = await User.findOne({ email: normalizeEmail(email) });
     if (!user)
       return res.status(400).json({ message: "Invalid verification request" });
 
@@ -151,7 +158,7 @@ export const resendVerificationCode = async (req, res) => {
     if (!email)
       return res.status(400).json({ message: "Email is required" });
 
-    const user = await User.findOne({ email: email.trim().toLowerCase() });
+    const user = await User.findOne({ email: normalizeEmail(email) });
     if (!user)
       return res.status(400).json({ message: "Invalid request" });
 
@@ -186,7 +193,7 @@ export const login = async (req, res) => {
     if (!email || !password)
       return res.status(400).json({ message: "All fields are required" });
 
-    const user = await User.findOne({ email: email.trim().toLowerCase() });
+    const user = await User.findOne({ email: normalizeEmail(email) });
     if (!user)
       return res.status(400).json({ message: "Invalid credentials" });
 
@@ -219,7 +226,7 @@ export const login = async (req, res) => {
   }
 };
 
-// ── FORGOT PASSWORD ──────────────────────────────────────────────────────────
+
 
 export const forgotPassword = async (req, res) => {
   try {
@@ -228,7 +235,7 @@ export const forgotPassword = async (req, res) => {
     if (!email)
       return res.status(400).json({ message: "Email is required" });
 
-    const user = await User.findOne({ email: email.trim().toLowerCase() });
+    const user = await User.findOne({ email: normalizeEmail(email) });
     if (!user) {
       return res.status(200).json({
         message: "If that email is registered, a reset code has been sent.",
@@ -285,7 +292,7 @@ export const resetPassword = async (req, res) => {
     if (!/[0-9]/.test(newPassword))
       return res.status(400).json({ message: "Password must include at least one number" });
 
-    const user = await User.findOne({ email: email.trim().toLowerCase() });
+    const user = await User.findOne({ email: normalizeEmail(email) });
     if (!user)
       return res.status(400).json({ message: "Invalid reset request" });
 
