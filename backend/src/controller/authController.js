@@ -10,12 +10,13 @@ const RESEND_COOLDOWN_MS = 60 * 1000; // 60 seconds between emails
 const MAX_CODE_ATTEMPTS = 5; // wrong guesses allowed per code
 
 const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_PASS,
-  },
+  host: "smtp.gmail.com",
+  port: 587,
+  secure: false,
+  auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS },
+  connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000,
 });
+transporter.verify().then(() => console.log("SMTP ready")).catch(e => console.log("SMTP FAILED:", e.code, e.message));
 
 // ---------- helpers ----------
 
