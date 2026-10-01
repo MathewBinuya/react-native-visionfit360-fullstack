@@ -3,7 +3,7 @@ import { model } from "../lib/gemini.js";
 import User from "../models/user.model.js";
 import Workout from "../models/workout.model.js";
 
-//  helper - call Gemini with automatic retry on rate limit (429) 
+//  helper - call Gemini with automatic retry on rate limit (429)
 const generateWithRetry = async (contents, generationConfig, maxRetries = 3) => {
   let lastErr;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -40,6 +40,21 @@ const isRateLimitError = (err) => {
   );
 };
 
+//  goal guidance — patterns, NOT rigid rules. Keep in sync with the mobile enum.
+const GOAL_GUIDANCE = {
+  get_fit:
+    "Goal: Get Fit — favour general strength, cardio, mobility and consistency.",
+  maintain_weight:
+    "Goal: Maintain Weight — sustainable activity with a balance of strength and cardio.",
+  get_lean:
+    "Goal: Get Lean / Ripped — resistance training with progressive overload plus appropriate cardio toward sustainable body-composition goals. No crash diets or extreme advice.",
+};
+
+const bmiCategory = (bmi) =>
+  bmi < 18.5 ? "underweight" : bmi < 25 ? "normal" : bmi < 30 ? "overweight" : "obese";
+
+//  Build the Gemini context from STRUCTURED, validated fields only.
+//  Never include free-text fields (bio, display name).
 const buildUserContext = async (userId) => {
   const user = await User.findById(userId).select("-password");
   const recent = await Workout.find({ user: userId, completed: true })
@@ -49,16 +64,66 @@ const buildUserContext = async (userId) => {
   let bmiLine = "BMI unknown";
   if (user?.heightCm && user?.weightKg) {
     const h = user.heightCm / 100;
-    const bmi = (user.weightKg / (h * h)).toFixed(1);
-    bmiLine = `BMI ${bmi} (height ${user.heightCm}cm, weight ${user.weightKg}kg)`;
+    const bmi = user.weightKg / (h * h);
+    bmiLine = `BMI ${bmi.toFixed(1)} (${bmiCategory(bmi)}; height ${user.heightCm}cm, weight ${user.weightKg}kg)`;
   }
+
+  const goalLine = user?.goal && GOAL_GUIDANCE[user.goal]
+    ? GOAL_GUIDANCE[user.goal]
+    : "Goal: not specified — assume general fitness.";
+
+  // light performance signal from recent history (no free text beyond our own titles)
+  const activity =
+    recent.length >= 3 ? "trains regularly" :
+    recent.length >= 1 ? "trains occasionally" :
+    "little recent training logged";
 
   const recentLine = recent.length
     ? recent.map((w) => `${w.title} (${w.exercises?.length || 0} exercises)`).join(", ")
     : "no recent workouts";
 
-  return `User profile: ${bmiLine}. Gender: ${user?.gender || "unspecified"}. Recent workouts: ${recentLine}.`;
+  const genderLine = user?.gender
+    ? `Gender: ${user.gender} (context only).`
+    : "Gender: unspecified.";
+
+  return (
+    `User profile: ${bmiLine}. ${goalLine} ${genderLine} Activity: ${activity}. Recent workouts: ${recentLine}. ` +
+    `Use all of this as COMBINED context. Do NOT stereotype by gender — never make a workout easier or harder based on gender alone. Tailor to the goal, BMI and training history together.`
+  );
 };
+
+// ----- server-side validation / clamping of AI output (defense-in-depth) -----
+// Gemini output is untrusted. We clamp to sane ranges, drop malformed entries,
+// and keep the EXACT response shape the frontend + POST /workouts expect.
+const clampInt = (n, lo, hi, dflt) => {
+  const x = Number(n);
+  if (!isFinite(x)) return dflt;
+  return Math.min(hi, Math.max(lo, Math.round(x)));
+};
+const clampFloat = (n, lo, hi, dflt) => {
+  const x = Number(n);
+  if (!isFinite(x)) return dflt;
+  return Math.min(hi, Math.max(lo, Math.round(x * 10) / 10));
+};
+
+const sanitizeSets = (sets) =>
+  (Array.isArray(sets) ? sets : [])
+    .slice(0, 12)
+    .map((s) => ({
+      reps: clampInt(s?.reps, 1, 100, 10),
+      weightKg: clampFloat(s?.weightKg, 0, 500, 0),
+      restSeconds: clampInt(s?.restSeconds, 0, 600, 60),
+    }));
+
+const sanitizeExercises = (exercises) =>
+  (Array.isArray(exercises) ? exercises : [])
+    .filter((e) => e && typeof e.name === "string" && e.name.trim())
+    .slice(0, 15)
+    .map((e) => ({ name: e.name.trim().slice(0, 60), sets: sanitizeSets(e.sets) }))
+    .filter((e) => e.sets.length > 0);
+
+const sanitizeText = (t, max) =>
+  (typeof t === "string" ? t.trim().slice(0, max) : "");
 
 const workoutRecommendationSchema = {
   type: SchemaType.OBJECT,
@@ -103,13 +168,26 @@ Recommend a single workout for today suited to this person. Keep the intro short
       { responseMimeType: "application/json", responseSchema: workoutRecommendationSchema }
     );
 
-    let recommendation;
+    let parsed;
     try {
-      recommendation = JSON.parse(raw);
+      parsed = JSON.parse(raw);
     } catch (parseErr) {
       console.log("Failed to parse AI JSON response:", raw);
       return res.status(500).json({ message: "Could not generate recommendation. Please try again." });
     }
+
+    // validate + clamp; fall back safely if nothing usable survives
+    const exercises = sanitizeExercises(parsed.exercises);
+    if (!exercises.length) {
+      console.log("AI recommendation had no valid exercises after sanitation");
+      return res.status(500).json({ message: "Could not generate recommendation. Please try again." });
+    }
+
+    const recommendation = {
+      intro: sanitizeText(parsed.intro, 300) || "Here's a workout for today.",
+      title: sanitizeText(parsed.title, 80) || "Today's Workout",
+      exercises,
+    };
 
     res.json({ recommendation });
   } catch (err) {
@@ -203,14 +281,21 @@ export const chatWithCoach = async (req, res) => {
       return res.status(500).json({ message: "Could not get a reply" });
     }
 
-    if (parsed.responseType === "workout" && parsed.exercises?.length) {
-      return res.json({
-        reply: parsed.reply,
-        workout: { title: parsed.title, exercises: parsed.exercises },
-      });
+    const reply = sanitizeText(parsed.reply, 2000) || "Sorry, I couldn't put that together. Try again.";
+
+    if (parsed.responseType === "workout") {
+      const exercises = sanitizeExercises(parsed.exercises);
+      // Only return a workout if valid exercises survived validation; otherwise
+      // degrade gracefully to a plain chat reply (preserves the response shape).
+      if (exercises.length) {
+        return res.json({
+          reply,
+          workout: { title: sanitizeText(parsed.title, 80) || "Workout", exercises },
+        });
+      }
     }
 
-    res.json({ reply: parsed.reply });
+    res.json({ reply });
   } catch (err) {
     console.log("AI chat error", err.message);
     if (isRateLimitError(err)) {

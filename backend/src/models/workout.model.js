@@ -4,6 +4,9 @@ const setSchema = new mongoose.Schema({
   reps: Number,
   weightKg: Number,
   restSeconds: Number,
+  // AR form quality (optional). Set by RepVision sessions; left unset for manual sets.
+  goodReps: Number,
+  badReps: Number,
   completed: {
     type: Boolean,
     default: false,
@@ -42,5 +45,9 @@ const workoutSchema = new mongoose.Schema({
 },
  {timestamps: true},
 );
+
+// Indexes for admin workout analytics (usage trend, per-exercise distinct users).
+workoutSchema.index({ createdAt: -1 });
+workoutSchema.index({ "exercises.name": 1 });
 
 export default mongoose.model("Workout", workoutSchema);

@@ -13,8 +13,8 @@ export const getProfile = async (req, res) => {
 
 export const updateProfile = async (req, res) => {
   try {
-    const { name, photo, bio, dateOfBirth, gender, heightCm, weightKg } = req.body;
-    const updates = { name, photo, bio, dateOfBirth, gender, heightCm, weightKg };
+    const { name, photo, bio, dateOfBirth, gender, heightCm, weightKg, goal } = req.body;
+    const updates = { name, photo, bio, dateOfBirth, gender, heightCm, weightKg, goal };
     Object.keys(updates).forEach((k) => updates[k] === undefined && delete updates[k]);
 
     const user = await User.findByIdAndUpdate(req.user.id, updates, {
@@ -59,6 +59,20 @@ export const deletePhoto = async (req, res) => {
   }
 };
 
+
+// Lightweight presence ping. The app calls this on login, on workout start/finish,
+// and on a throttled interval. Only touches lastActiveAt — no other side effects.
+export const heartbeat = async (req, res) => {
+  try {
+    await User.updateOne(
+      { _id: req.user.id },
+      { $set: { lastActiveAt: new Date() } }
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
 
 export const completeOnBoarding = async (req, res) => {
   try {

@@ -8,6 +8,7 @@ import bmiRoutes from "./routes/bmiRoutes.js";
 import workoutRoutes from "./routes/workoutRoutes.js";
 import aiRoutes from './routes/aiRoutes.js'
 import adminRoutes from "./routes/adminRoutes.js";
+import feedbackRoutes from "./routes/feedbackRoutes.js";
 import cors from "cors";
 
 import { connectDB } from "./lib/db.js";
@@ -26,6 +27,7 @@ app.use("/api/profile", profileRoutes);
 app.use("/api/bmi", bmiRoutes);
 app.use("/api/workouts", workoutRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/feedback", feedbackRoutes);
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

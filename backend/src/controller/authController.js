@@ -1,4 +1,5 @@
 import User from "../models/user.model.js";
+import LoginEvent from "../models/loginEvent.model.js";
 import generateToken from "../utils/generateToken.js";
 import { isAllowedEmail, normalizeEmail } from "../utils/emailValidator.js";
 import nodemailer from "nodemailer";
@@ -194,7 +195,15 @@ export const verifyEmail = async (req, res) => {
 
     const token = generateToken(user._id);
     user.currentToken = token;
+    // first successful login happens right after verification — stamp it too
+    const now = new Date();
+    user.lastLoginAt = now;
+    user.lastActiveAt = now;
     await user.save();
+
+    LoginEvent.create({ user: user._id, createdAt: now }).catch((e) =>
+      console.log("Failed to record login event:", e.message)
+    );
 
     res.status(200).json({
       message: "Email verified successfully.",
@@ -274,7 +283,16 @@ export const login = async (req, res) => {
     const token = generateToken(user._id);
 
     user.currentToken = token;
+    // stamp login + presence (additive — does not change the response shape)
+    const now = new Date();
+    user.lastLoginAt = now;
+    user.lastActiveAt = now;
     await user.save();
+
+    // record the login event for the admin "recent logins" view (best-effort, never blocks login)
+    LoginEvent.create({ user: user._id, createdAt: now }).catch((e) =>
+      console.log("Failed to record login event:", e.message)
+    );
 
     res.status(200).json({
       token,

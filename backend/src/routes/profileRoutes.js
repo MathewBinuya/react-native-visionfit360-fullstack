@@ -7,12 +7,15 @@ import {
   uploadPhoto,
   deletePhoto,
   completeOnBoarding,
+  heartbeat,
 } from "../controller/profileController.js";
 
 const router = express.Router();
 
 router.get("/", auth, getProfile);
 router.put("/", auth, updateProfile);
+
+router.post("/heartbeat", auth, heartbeat);   // presence ping
 
 router.post("/photo", auth, upload.single("photo"), uploadPhoto);
 router.delete("/photo", auth, deletePhoto);

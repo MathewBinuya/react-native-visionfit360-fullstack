@@ -3,9 +3,23 @@ import Admin from "../models/admin.model.js";
 import User from "../models/user.model.js";
 import Workout from "../models/workout.model.js";
 import Exercise from "../models/exercise.model.js";
+import Feedback from "../models/feedback.model.js";
+import LoginEvent from "../models/loginEvent.model.js";
+import {
+  ACTIVE_WINDOW_MS,
+  RECENTLY_ACTIVE_WINDOW_MS,
+  presenceStatus,
+} from "../lib/presence.js";
 
 const generateAdminToken = (id) =>
   jwt.sign({ id, role: "admin" }, process.env.JWT_SECRET, { expiresIn: "7d" });
+
+// Explicit allow-list of user fields safe to expose to admins.
+// (Never leak password, currentToken, reset/verification codes, etc.)
+const SAFE_USER_FIELDS =
+  "name username email photo bio gender goal dateOfBirth heightCm weightKg status onBoardingComplete isVerified createdAt updatedAt lastLoginAt lastActiveAt";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 //  AUTH 
 export const adminLogin = async (req, res) => {
@@ -48,10 +62,10 @@ export const getStats = async (req, res) => {
   }
 };
 
-//  USER MANAGEMENT 
+//  USER MANAGEMENT
 export const getUsers = async (req, res) => {
   try {
-    const users = await User.find().select("-password").sort({ createdAt: -1 });
+    const users = await User.find().select(SAFE_USER_FIELDS).sort({ createdAt: -1 });
     res.json(users);
   } catch (error) {
     res.status(500).json({ message: "Server error" });
@@ -60,10 +74,13 @@ export const getUsers = async (req, res) => {
 
 export const getUserById = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id).select("-password");
+    const user = await User.findById(req.params.id).select(SAFE_USER_FIELDS);
     if (!user) return res.status(404).json({ message: "User not found" });
-    const workouts = await Workout.find({ user: user._id }).sort({ createdAt: -1 });
-    res.json({ user, workouts });
+    const [workouts, feedback] = await Promise.all([
+      Workout.find({ user: user._id }).sort({ createdAt: -1 }),
+      Feedback.find({ user: user._id }).sort({ createdAt: -1 }),
+    ]);
+    res.json({ user, workouts, feedback });
   } catch (error) {
     res.status(500).json({ message: "Server error" });
   }
@@ -118,6 +135,300 @@ export const deleteExercise = async (req, res) => {
   }
 };
 
+//  DASHBOARD (aggregated, admin-only)
+//  Heavy aggregations for the full dashboard. Trends respect ?range=7|30 (days).
+export const getDashboard = async (req, res) => {
+  try {
+    const range = [7, 30].includes(Number(req.query.range)) ? Number(req.query.range) : 7;
+    const now = new Date();
+    const rangeStart = new Date(now.getTime() - range * DAY_MS);
+    const recentlyActiveThreshold = new Date(now.getTime() - RECENTLY_ACTIVE_WINDOW_MS);
+
+    const [
+      totalUsers,
+      newUsers,
+      activeUsers,
+      totalSessions,
+      sessionsInRange,
+      demographics,
+      exerciseUsage,
+      repQualityAgg,
+      workoutTrend,
+      newUserTrend,
+      feedbackFacet,
+      recentFeedback,
+      recentLogins,
+      recentUsers,
+    ] = await Promise.all([
+      User.countDocuments(),
+      User.countDocuments({ createdAt: { $gte: rangeStart } }),
+      User.countDocuments({ lastActiveAt: { $gte: recentlyActiveThreshold } }),
+      Workout.countDocuments(),
+      Workout.countDocuments({ createdAt: { $gte: rangeStart } }),
+
+      // --- demographics: one pass over users, several facets ---
+      User.aggregate([
+        {
+          $facet: {
+            gender: [
+              { $group: { _id: { $ifNull: ["$gender", "Not specified"] }, count: { $sum: 1 } } },
+            ],
+            ageGroups: [
+              {
+                $addFields: {
+                  age: {
+                    $cond: [
+                      { $ifNull: ["$dateOfBirth", false] },
+                      { $dateDiff: { startDate: "$dateOfBirth", endDate: "$$NOW", unit: "year" } },
+                      null,
+                    ],
+                  },
+                },
+              },
+              {
+                $addFields: {
+                  ageGroup: {
+                    $switch: {
+                      branches: [
+                        { case: { $eq: ["$age", null] }, then: "Not specified" },
+                        { case: { $lt: ["$age", 18] }, then: "Under 18" },
+                        { case: { $lt: ["$age", 25] }, then: "18-24" },
+                        { case: { $lt: ["$age", 35] }, then: "25-34" },
+                        { case: { $lt: ["$age", 45] }, then: "35-44" },
+                        { case: { $lt: ["$age", 55] }, then: "45-54" },
+                      ],
+                      default: "55+",
+                    },
+                  },
+                },
+              },
+              { $group: { _id: "$ageGroup", count: { $sum: 1 } } },
+            ],
+            bmiCategories: [
+              {
+                $addFields: {
+                  bmi: {
+                    $cond: [
+                      { $and: [{ $gt: ["$heightCm", 0] }, { $gt: ["$weightKg", 0] }] },
+                      { $divide: ["$weightKg", { $pow: [{ $divide: ["$heightCm", 100] }, 2] }] },
+                      null,
+                    ],
+                  },
+                },
+              },
+              {
+                $addFields: {
+                  bmiCategory: {
+                    $switch: {
+                      branches: [
+                        { case: { $eq: ["$bmi", null] }, then: "Not specified" },
+                        { case: { $lt: ["$bmi", 18.5] }, then: "Underweight" },
+                        { case: { $lt: ["$bmi", 25] }, then: "Normal" },
+                        { case: { $lt: ["$bmi", 30] }, then: "Overweight" },
+                      ],
+                      default: "Obese",
+                    },
+                  },
+                },
+              },
+              { $group: { _id: "$bmiCategory", count: { $sum: 1 } } },
+            ],
+            body: [
+              {
+                $group: {
+                  _id: null,
+                  avgHeight: { $avg: "$heightCm" },
+                  minHeight: { $min: "$heightCm" },
+                  maxHeight: { $max: "$heightCm" },
+                  avgWeight: { $avg: "$weightKg" },
+                  minWeight: { $min: "$weightKg" },
+                  maxWeight: { $max: "$weightKg" },
+                  withHeight: { $sum: { $cond: [{ $gt: ["$heightCm", 0] }, 1, 0] } },
+                  withWeight: { $sum: { $cond: [{ $gt: ["$weightKg", 0] }, 1, 0] } },
+                },
+              },
+            ],
+          },
+        },
+      ]),
+
+      // --- users per exercise + sessions per exercise ---
+      Workout.aggregate([
+        { $unwind: "$exercises" },
+        { $match: { "exercises.name": { $nin: [null, ""] } } },
+        {
+          $group: {
+            _id: { $toLower: "$exercises.name" },
+            users: { $addToSet: "$user" },
+            sessions: { $sum: 1 },
+          },
+        },
+        { $project: { _id: 0, exercise: "$_id", userCount: { $size: "$users" }, sessions: 1 } },
+        { $sort: { userCount: -1, sessions: -1 } },
+        { $limit: 50 },
+      ]),
+
+      // --- good vs bad rep totals (only AR sets carry these) ---
+      Workout.aggregate([
+        { $unwind: "$exercises" },
+        { $unwind: "$exercises.sets" },
+        {
+          $group: {
+            _id: null,
+            good: { $sum: { $ifNull: ["$exercises.sets.goodReps", 0] } },
+            bad: { $sum: { $ifNull: ["$exercises.sets.badReps", 0] } },
+          },
+        },
+      ]),
+
+      // --- workout usage trend (per day, within range) ---
+      Workout.aggregate([
+        { $match: { createdAt: { $gte: rangeStart } } },
+        {
+          $group: {
+            _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
+
+      // --- new users trend (per day, within range) ---
+      User.aggregate([
+        { $match: { createdAt: { $gte: rangeStart } } },
+        {
+          $group: {
+            _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
+
+      // --- feedback summary + rating distribution ---
+      Feedback.aggregate([
+        {
+          $facet: {
+            summary: [{ $group: { _id: null, avg: { $avg: "$rating" }, count: { $sum: 1 } } }],
+            distribution: [
+              { $group: { _id: "$rating", count: { $sum: 1 } } },
+              { $sort: { _id: 1 } },
+            ],
+          },
+        },
+      ]),
+
+      Feedback.find().sort({ createdAt: -1 }).limit(20).populate("user", "name username photo"),
+      LoginEvent.find().sort({ createdAt: -1 }).limit(20).populate("user", "name username photo"),
+      User.find().sort({ createdAt: -1 }).limit(10).select("name username email gender createdAt"),
+    ]);
+
+    const demo = demographics[0] || {};
+    const repQuality = repQualityAgg[0] || { good: 0, bad: 0 };
+    const fb = feedbackFacet[0] || { summary: [], distribution: [] };
+    const fbSummary = fb.summary[0] || { avg: 0, count: 0 };
+
+    res.json({
+      range,
+      generatedAt: now,
+      kpis: {
+        totalUsers,
+        newUsers,
+        activeUsers, // seen within the "recently active" window
+        totalSessions,
+        sessionsInRange,
+        avgRating: fbSummary.avg ? +fbSummary.avg.toFixed(2) : 0,
+        feedbackCount: fbSummary.count,
+      },
+      demographics: {
+        gender: demo.gender || [],
+        ageGroups: demo.ageGroups || [],
+        bmiCategories: demo.bmiCategories || [],
+        body: (demo.body && demo.body[0]) || null,
+      },
+      workouts: {
+        exerciseUsage, // [{ exercise, userCount, sessions }]
+        repQuality,    // { good, bad }  (ratio only meaningful when good+bad > 0)
+        usageTrend: workoutTrend.map((d) => ({ date: d._id, count: d.count })),
+      },
+      analytics: {
+        newUsersTrend: newUserTrend.map((d) => ({ date: d._id, count: d.count })),
+      },
+      feedback: {
+        avgRating: fbSummary.avg ? +fbSummary.avg.toFixed(2) : 0,
+        count: fbSummary.count,
+        distribution: fb.distribution.map((d) => ({ rating: d._id, count: d.count })),
+        recent: recentFeedback,
+      },
+      logins: { recent: recentLogins },
+      recentUsers,
+    });
+  } catch (error) {
+    console.log("getDashboard error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+//  PRESENCE (lightweight, polled frequently by the dashboard)
+export const getPresence = async (req, res) => {
+  try {
+    const now = Date.now();
+    const activeThreshold = new Date(now - ACTIVE_WINDOW_MS);
+    const recentThreshold = new Date(now - RECENTLY_ACTIVE_WINDOW_MS);
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+
+    const [countsAgg, users] = await Promise.all([
+      User.aggregate([
+        {
+          $group: {
+            _id: null,
+            total: { $sum: 1 },
+            active: { $sum: { $cond: [{ $gte: ["$lastActiveAt", activeThreshold] }, 1, 0] } },
+            recentlyActive: {
+              $sum: {
+                $cond: [
+                  {
+                    $and: [
+                      { $lt: ["$lastActiveAt", activeThreshold] },
+                      { $gte: ["$lastActiveAt", recentThreshold] },
+                    ],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            },
+          },
+        },
+      ]),
+      User.find({ lastActiveAt: { $gte: recentThreshold } })
+        .sort({ lastActiveAt: -1 })
+        .limit(limit)
+        .select("name username photo lastActiveAt"),
+    ]);
+
+    const c = countsAgg[0] || { total: 0, active: 0, recentlyActive: 0 };
+    const inactive = c.total - c.active - c.recentlyActive;
+    const list = users.map((u) => ({
+      _id: u._id,
+      name: u.name,
+      username: u.username,
+      photo: u.photo,
+      lastActiveAt: u.lastActiveAt,
+      status: presenceStatus(u.lastActiveAt, now),
+    }));
+
+    res.json({
+      counts: { total: c.total, active: c.active, recentlyActive: c.recentlyActive, inactive },
+      users: list,
+      windows: { activeMs: ACTIVE_WINDOW_MS, recentlyActiveMs: RECENTLY_ACTIVE_WINDOW_MS },
+    });
+  } catch (error) {
+    console.log("getPresence error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 export const updateUserStatus = async (req, res) => {
   try {
     const { status } = req.body;   // "active" or "inactive"
@@ -128,7 +439,7 @@ export const updateUserStatus = async (req, res) => {
       req.params.id,
       { status },
       { new: true }
-    ).select("-password");
+    ).select(SAFE_USER_FIELDS);
     if (!user) return res.status(404).json({ message: "User not found" });
     res.json(user);
   } catch (error) {
