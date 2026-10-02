@@ -3,6 +3,7 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Users from "./pages/Users";
 import Exercises from "./pages/Exercises";
+import UsersPerExercise from "./pages/UsersPerExercise";
 import UserDetail from "./pages/UserDetail";
 import "./App.css";
 
@@ -18,6 +19,7 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
         <Route path="/users" element={<Protected><Users /></Protected>} />
+        <Route path="/users-per-exercise" element={<Protected><UsersPerExercise /></Protected>} />
         <Route path="/exercises" element={<Protected><Exercises /></Protected>} />
         <Route path="/users/:id" element={<Protected><UserDetail /></Protected>} />
         <Route path="*" element={<Navigate to="/login" />} />

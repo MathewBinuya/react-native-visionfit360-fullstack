@@ -15,7 +15,8 @@ export default function Sidebar() {
       <div className="brand">VisionFIT360</div>
       <NavLink to="/dashboard" className={({ isActive }) => isActive ? "active" : ""}>Dashboard</NavLink>
       <NavLink to="/users" className={({ isActive }) => isActive ? "active" : ""}>Users</NavLink>
-      <NavLink to="/exercises" className={({ isActive }) => isActive ? "active" : ""}>Exercises</NavLink>
+      <NavLink to="/users-per-exercise" className={({ isActive }) => isActive ? "active" : ""}>Users per Exercise</NavLink>
+      <NavLink to="/exercises" className={({ isActive }) => isActive ? "active" : ""}>Manage Exercises</NavLink>
       <button className="logout" onClick={logout}>Log out ({adminName})</button>
     </div>
   );

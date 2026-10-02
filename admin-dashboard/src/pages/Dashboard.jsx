@@ -4,9 +4,28 @@ import Sidebar from "../components/Sidebar";
 import { Section, StatCard, StateBlock, PresenceBadge, Avatar, RatingStars } from "../components/ui";
 import { LineChart, BarChart } from "../components/Charts";
 import api from "../lib/api";
-import { exerciseLabel, relativeTime, shortDate, displayName } from "../lib/format";
+import { exerciseLabel, relativeTime, displayName } from "../lib/format";
 
 const PRESENCE_POLL_MS = 20000; // how often the dashboard refreshes presence
+const EXERCISE_PREVIEW = 8;     // top-N exercises shown on the dashboard (full list lives on its own page)
+
+const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+const GENDER_ORDER = ["male", "female", "other", "Not specified"];
+const AGE_ORDER = ["Under 18", "18-24", "25-34", "35-44", "45-54", "55+", "Not specified"];
+const BMI_ORDER = ["Underweight", "Normal", "Overweight", "Obese", "Not specified"];
+
+// turn a [{_id,count}] breakdown into ordered BarChart rows
+const toBars = (arr, order, labelFn = (x) => x) => {
+  const map = new Map((arr || []).map((d) => [d._id, d.count]));
+  const rows = order.filter((k) => map.has(k)).map((k) => ({ label: labelFn(k), value: map.get(k) }));
+  for (const d of arr || []) if (!order.includes(d._id)) rows.push({ label: labelFn(d._id), value: d.count });
+  return rows;
+};
+
+function Breakdown({ rows }) {
+  if (!rows.length) return <div className="state state-empty">No data</div>;
+  return <BarChart data={rows} />;
+}
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -54,6 +73,10 @@ export default function Dashboard() {
   const rep = data?.workouts?.repQuality;
   const repTotal = rep ? (rep.good || 0) + (rep.bad || 0) : 0;
 
+  const demo = data?.demographics || {};
+  const body = demo.body;
+  const exercisePreview = (data?.workouts?.exerciseUsage || []).slice(0, EXERCISE_PREVIEW);
+
   return (
     <div className="layout">
       <Sidebar />
@@ -82,42 +105,46 @@ export default function Dashboard() {
         </div>
 
         {/* ===== USERS ===== */}
-        <Section title="Users" subtitle="Accounts and presence snapshot">
+        <Section
+          title="Users"
+          subtitle="Accounts and presence snapshot"
+          actions={<button className="link-btn" onClick={() => navigate("/users")}>View all users →</button>}
+        >
           <StateBlock loading={dashLoading && !data} error={dashError}>
             <div className="stat-grid">
               <StatCard label="Total Users" value={k?.totalUsers ?? "—"} />
-              <StatCard
-                label="Active now"
-                value={counts?.active ?? "—"}
-                hint="seen in last 2 min"
-              />
-              <StatCard
-                label="Recently active"
-                value={counts?.recentlyActive ?? "—"}
-                hint="seen in last 15 min"
-              />
+              <StatCard label="Active now" value={counts?.active ?? "—"} hint="seen in last 2 min" />
+              <StatCard label="Recently active" value={counts?.recentlyActive ?? "—"} hint="seen in last 15 min" />
               <StatCard label="Inactive" value={counts?.inactive ?? "—"} hint="older / never" />
             </div>
+          </StateBlock>
+        </Section>
 
+        {/* ===== DEMOGRAPHICS ===== */}
+        <Section title="Demographics" subtitle="Who your users are — missing data shown as “Not specified”">
+          <StateBlock loading={dashLoading && !data} error={dashError}>
+            <div className="demo-grid">
+              <div className="card">
+                <h3 className="card-title">Gender</h3>
+                <Breakdown rows={toBars(demo.gender, GENDER_ORDER, cap)} />
+              </div>
+              <div className="card">
+                <h3 className="card-title">Age groups</h3>
+                <Breakdown rows={toBars(demo.ageGroups, AGE_ORDER)} />
+              </div>
+              <div className="card">
+                <h3 className="card-title">BMI categories</h3>
+                <Breakdown rows={toBars(demo.bmiCategories, BMI_ORDER)} />
+              </div>
+            </div>
             <div className="card">
-              <h3 className="card-title">Recently registered</h3>
-              <StateBlock empty={!data?.recentUsers?.length} emptyText="No users yet.">
-                <table className="rows">
-                  <thead>
-                    <tr><th>User</th><th>Email</th><th>Gender</th><th>Joined</th></tr>
-                  </thead>
-                  <tbody>
-                    {data?.recentUsers?.map((u) => (
-                      <tr key={u._id} className="clickable" onClick={() => goUser(u._id)}>
-                        <td className="user-cell"><Avatar user={u} /> {displayName(u)}</td>
-                        <td className="muted">{u.email}</td>
-                        <td>{u.gender || "Not specified"}</td>
-                        <td className="muted">{shortDate(u.createdAt)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </StateBlock>
+              <h3 className="card-title">Body summary</h3>
+              <div className="mini-stats">
+                <div><span>Avg height</span><strong>{body?.avgHeight ? `${Math.round(body.avgHeight)} cm` : "—"}</strong></div>
+                <div><span>Avg weight</span><strong>{body?.avgWeight ? `${Math.round(body.avgWeight)} kg` : "—"}</strong></div>
+                <div><span>Height on file</span><strong>{body?.withHeight ?? 0}</strong></div>
+                <div><span>Weight on file</span><strong>{body?.withWeight ?? 0}</strong></div>
+              </div>
             </div>
           </StateBlock>
         </Section>
@@ -171,7 +198,11 @@ export default function Dashboard() {
         </Section>
 
         {/* ===== WORKOUTS ===== */}
-        <Section title="Workouts" subtitle="Usage across exercises">
+        <Section
+          title="Workouts"
+          subtitle="Usage across exercises"
+          actions={<button className="link-btn" onClick={() => navigate("/users-per-exercise")}>Users per exercise →</button>}
+        >
           <StateBlock loading={dashLoading && !data} error={dashError}>
             <div className="stat-grid">
               <StatCard label="Total sessions" value={k?.totalSessions ?? "—"} />
@@ -184,13 +215,13 @@ export default function Dashboard() {
             </div>
 
             <div className="card">
-              <h3 className="card-title">Users per exercise</h3>
+              <h3 className="card-title">Top exercises by users</h3>
               <StateBlock
-                empty={!data?.workouts?.exerciseUsage?.length}
+                empty={!exercisePreview.length}
                 emptyText="No workout records yet."
               >
                 <BarChart
-                  data={(data?.workouts?.exerciseUsage || []).map((e) => ({
+                  data={exercisePreview.map((e) => ({
                     label: exerciseLabel(e.exercise),
                     value: e.userCount,
                     sub: `${e.sessions} sessions`,

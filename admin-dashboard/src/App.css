@@ -213,6 +213,46 @@ tr.clickable:hover { background: var(--input-bg); }
 .hbar-value { font-size: 13px; font-weight: 600; color: var(--ink); white-space: nowrap; }
 .hbar-sub { font-weight: 400; color: var(--gray); font-size: 12px; }
 
+/* link-style button + section actions */
+.link-btn {
+  background: none; border: none; color: var(--chart); font-size: 13px; font-weight: 600;
+  cursor: pointer; padding: 4px 2px;
+}
+.link-btn:hover { text-decoration: underline; }
+
+/* demographics */
+.demo-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 16px; }
+.mini-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; }
+.mini-stats > div { display: flex; flex-direction: column; gap: 4px; }
+.mini-stats span { font-size: 12px; color: var(--muted); }
+.mini-stats strong { font-size: 20px; font-weight: 700; color: var(--ink); }
+
+/* users-per-exercise cards */
+.ex-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; }
+.ex-card {
+  text-align: left; background: var(--cards); border: 1px solid var(--border); border-radius: 14px;
+  padding: 18px; cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s, transform 0.05s;
+}
+.ex-card:hover { border-color: var(--chart); box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+.ex-card:active { transform: translateY(1px); }
+.ex-card-name { font-size: 14px; font-weight: 600; color: var(--ink); margin-bottom: 10px; }
+.ex-card-count { font-size: 30px; font-weight: 800; color: var(--ink); line-height: 1; }
+.ex-card-sub { font-size: 12px; color: var(--gray); margin-top: 6px; }
+
+/* toolbar + search */
+.toolbar { display: flex; gap: 10px; margin-bottom: 14px; }
+.search-input {
+  flex: 1; max-width: 420px; background: var(--cards); border: 1px solid var(--border);
+  border-radius: 10px; padding: 11px 14px; font-size: 14px; color: var(--ink);
+}
+.search-input:focus { outline: none; border-color: var(--chart); }
+.search-input::placeholder { color: var(--placeholder); }
+
+/* pager */
+.pager { display: flex; align-items: center; gap: 14px; margin-top: 16px; }
+.pager-info { font-size: 13px; color: var(--muted); }
+.btn-small:disabled { opacity: 0.45; cursor: not-allowed; }
+
 /* responsive */
 @media (max-width: 900px) {
   .two-col { grid-template-columns: 1fr; }
