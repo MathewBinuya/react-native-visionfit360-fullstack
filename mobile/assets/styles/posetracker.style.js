@@ -28,6 +28,12 @@ const styles = StyleSheet.create({
   backText: { color: COLORS.white, fontWeight: "600", fontFamily: "GeneralSans-Variable" },
 
   headerTitle: { fontSize: 17, fontWeight: "600", color: COLORS.black, textTransform: "capitalize", fontFamily: "GeneralSans-Variable" },
+  howBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: COLORS.button, borderRadius: 20,
+    paddingHorizontal: 14, paddingVertical: 7,
+  },
+  howBtnText: { color: COLORS.white, fontSize: 14, fontWeight: "600", fontFamily: "GeneralSans-Variable" },
   webviewWrap: {
     flex: 1,
     margin: 16,
@@ -58,6 +64,35 @@ const styles = StyleSheet.create({
   },
   
   finishText: { color: COLORS.white, fontSize: 15, fontWeight: "600", fontFamily: "GeneralSans-Variable" },
+
+  // first-use popup overlay (reuses the app's modal design language)
+  popupOverlay: {
+    position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center", alignItems: "center", padding: 24,
+    zIndex: 90, elevation: 90,
+  },
+  popupCard: {
+    backgroundColor: COLORS.white, borderRadius: 20, padding: 24,
+    width: "100%", maxWidth: 400, alignItems: "center",
+  },
+  popupIcon: {
+    width: 56, height: 56, borderRadius: 28, backgroundColor: COLORS.button,
+    justifyContent: "center", alignItems: "center", marginBottom: 14,
+  },
+  popupTitle: {
+    fontSize: 18, fontWeight: "700", color: COLORS.black, textAlign: "center",
+    marginBottom: 10, fontFamily: "GeneralSans-Variable",
+  },
+  popupText: {
+    fontSize: 14, color: COLORS.gray, lineHeight: 20, textAlign: "center",
+    marginBottom: 22, fontFamily: "GeneralSans-Variable",
+  },
+  popupBtn: {
+    backgroundColor: COLORS.button, borderRadius: 12, paddingVertical: 14,
+    alignItems: "center", alignSelf: "stretch",
+  },
+  popupBtnText: { color: COLORS.white, fontSize: 15, fontWeight: "700", fontFamily: "GeneralSans-Variable" },
 });
 
 export default styles;

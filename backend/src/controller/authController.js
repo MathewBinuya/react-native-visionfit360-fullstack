@@ -2,21 +2,12 @@ import User from "../models/user.model.js";
 import LoginEvent from "../models/loginEvent.model.js";
 import generateToken from "../utils/generateToken.js";
 import { isAllowedEmail, normalizeEmail } from "../utils/emailValidator.js";
-import nodemailer from "nodemailer";
+import { sendEmail } from "../lib/email.js";
 import crypto from "crypto";
 
 const CODE_EXPIRY_MS = 15 * 60 * 1000; // 15 minutes
 const RESEND_COOLDOWN_MS = 60 * 1000; // 60 seconds between emails
 const MAX_CODE_ATTEMPTS = 5; // wrong guesses allowed per code
-
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 587,
-  secure: false,
-  auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS },
-  connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000,
-});
-transporter.verify().then(() => console.log("SMTP ready")).catch(e => console.log("SMTP FAILED:", e.code, e.message));
 
 // ---------- helpers ----------
 
@@ -141,8 +132,7 @@ export const register = async (req, res) => {
 
     console.log("Sending verification email to:", user.email);
 
-    await transporter.sendMail({
-      from: `"VisionFIT360" <${process.env.GMAIL_USER}>`,
+    await sendEmail({
       to: user.email,
       subject: "VisionFIT360 — Verify Your Email",
       html: verificationEmailHtml(verificationCode),
@@ -249,8 +239,7 @@ export const resendVerificationCode = async (req, res) => {
 
     console.log("Resending verification email to:", user.email);
 
-    await transporter.sendMail({
-      from: `"VisionFIT360" <${process.env.GMAIL_USER}>`,
+    await sendEmail({
       to: user.email,
       subject: "VisionFIT360 — Verify Your Email",
       html: verificationEmailHtml(verificationCode),
@@ -343,8 +332,7 @@ export const forgotPassword = async (req, res) => {
 
     console.log("Sending reset email to:", user.email);
 
-    await transporter.sendMail({
-      from: `"VisionFIT360" <${process.env.GMAIL_USER}>`,
+    await sendEmail({
       to: user.email,
       subject: "VisionFIT360 — Your Password Reset Code",
       html: resetEmailHtml(resetCode),

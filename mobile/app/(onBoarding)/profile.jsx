@@ -1,69 +1,130 @@
-import { View, 
-         Text, 
+import { View,
+         Text,
          TextInput,
          KeyboardAvoidingView,
          ActivityIndicator,
          TouchableOpacity,
+         ScrollView,
          Platform,
-         Alert,
         } from 'react-native'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import COLORS from "../../constants/colors"
 import styles from '../../assets/styles/onBoardingStyle/profile.style';
 import { router } from "expo-router";
 import api from '../../lib/axios';
+import { useAuthStore } from '../../store/authStore';
+import { useAlert } from '../../components/AppAlert';
+import {
+  cmToFtIn, ftInToCm, kgToLb, lbToKg, cleanNumber, unitPrefKey,
+  MIN_HEIGHT_CM, MAX_HEIGHT_CM, MIN_WEIGHT_KG, MAX_WEIGHT_KG,
+} from '../../lib/units';
 
 
 const GENDER_OPTIONS = ["male", "female", "other"];
 
-// realistic limits so people can't enter nonsense like 0 or 99999
-const HEIGHT_MIN = 50, HEIGHT_MAX = 250;
-const WEIGHT_MIN = 20, WEIGHT_MAX = 300;
-
 export default function Profile() {
-  const [form, setForm] = useState({ name: "", bio: "", gender: "", heightCm: "", weightKg: "" });
+  const user = useAuthStore((s) => s.user);
+  const alert = useAlert();
+
+  const [form, setForm] = useState({ name: "", bio: "", gender: "" });
   const [isSaving, setIsSaving] = useState(false);
 
-  const height = Number(form.heightCm);
-  const weight = Number(form.weightKg);
+  // canonical metric values (what we send) — strings so inputs stay controlled
+  const [metricHeight, setMetricHeight] = useState("");
+  const [metricWeight, setMetricWeight] = useState("");
 
-  // every field must be filled in (whitespace-only doesn't count)
+  // display units + the per-unit input fields
+  const [heightUnit, setHeightUnit] = useState("cm"); // 'cm' | 'ft'
+  const [weightUnit, setWeightUnit] = useState("kg"); // 'kg' | 'lb'
+  const [ftVal, setFtVal] = useState("");
+  const [inVal, setInVal] = useState("");
+  const [lbVal, setLbVal] = useState("");
+
+  // restore the user's saved unit preference
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(unitPrefKey(user?.id));
+        if (raw) {
+          const p = JSON.parse(raw);
+          if (p.height === "ft" || p.height === "cm") setHeightUnit(p.height);
+          if (p.weight === "lb" || p.weight === "kg") setWeightUnit(p.weight);
+        }
+      } catch (_e) {}
+    })();
+  }, [user?.id]);
+
+  const savePref = async (height, weight) => {
+    try {
+      await AsyncStorage.setItem(unitPrefKey(user?.id), JSON.stringify({ height, weight }));
+    } catch (_e) {}
+  };
+
+  // gender is REQUIRED now — name/bio/gender/height/weight are all needed to continue
   const isComplete =
     form.name.trim() !== "" &&
     form.bio.trim() !== "" &&
-    form.gender !== "" &&
-    form.heightCm !== "" &&
-    form.weightKg !== "";
+    GENDER_OPTIONS.includes(form.gender) &&
+    metricHeight !== "" &&
+    metricWeight !== "";
 
-  // returns an error message, or null if everything is valid
   const validate = () => {
     if (!form.name.trim()) return "Please enter your name";
     if (!form.bio.trim()) return "Please tell us a little about yourself";
-    if (!form.gender) return "Please select your gender";
-    if (!form.heightCm) return "Please enter your height";
-    if (isNaN(height) || height < HEIGHT_MIN || height > HEIGHT_MAX)
-      return `Height must be between ${HEIGHT_MIN} and ${HEIGHT_MAX} cm`;
-    if (!form.weightKg) return "Please enter your weight";
-    if (isNaN(weight) || weight < WEIGHT_MIN || weight > WEIGHT_MAX)
-      return `Weight must be between ${WEIGHT_MIN} and ${WEIGHT_MAX} kg`;
+    if (!GENDER_OPTIONS.includes(form.gender)) return "Please select your gender";
+    if (!metricHeight) return "Please enter your height";
+    const h = Number(metricHeight);
+    if (isNaN(h) || h < MIN_HEIGHT_CM || h > MAX_HEIGHT_CM)
+      return `Please enter a valid height (${MIN_HEIGHT_CM}–${MAX_HEIGHT_CM} cm)`;
+    if (!metricWeight) return "Please enter your weight";
+    const w = Number(metricWeight);
+    if (isNaN(w) || w < MIN_WEIGHT_KG || w > MAX_WEIGHT_KG)
+      return `Please enter a valid weight (${MIN_WEIGHT_KG}–${MAX_WEIGHT_KG} kg)`;
     return null;
   };
 
-  // allow only digits (and one decimal point for weight)
-  const onlyNumber = (text, allowDecimal = false) => {
-    const pattern = allowDecimal ? /[^0-9.]/g : /[^0-9]/g;
-    let cleaned = text.replace(pattern, "");
-    if (allowDecimal) {
-      const [whole, ...rest] = cleaned.split(".");
-      cleaned = rest.length ? `${whole}.${rest.join("")}` : whole;
+  // --- height handlers ---
+  const onHeightCm = (t) => setMetricHeight(cleanNumber(t));
+  const onFt = (t) => {
+    const v = cleanNumber(t);
+    setFtVal(v);
+    setMetricHeight(ftInToCm(v, inVal));
+  };
+  const onIn = (t) => {
+    const v = cleanNumber(t);
+    setInVal(v);
+    setMetricHeight(ftInToCm(ftVal, v));
+  };
+  const toggleHeightUnit = (u) => {
+    if (u === heightUnit) return;
+    if (u === "ft") {
+      const { ft, in: inch } = cmToFtIn(metricHeight);
+      setFtVal(ft); setInVal(inch);
     }
-    return cleaned;
+    // switching to cm keeps metricHeight as-is (canonical)
+    setHeightUnit(u);
+    savePref(u, weightUnit);
+  };
+
+  // --- weight handlers ---
+  const onWeightKg = (t) => setMetricWeight(cleanNumber(t, true));
+  const onLb = (t) => {
+    const v = cleanNumber(t, true);
+    setLbVal(v);
+    setMetricWeight(lbToKg(v));
+  };
+  const toggleWeightUnit = (u) => {
+    if (u === weightUnit) return;
+    if (u === "lb") setLbVal(kgToLb(metricWeight));
+    setWeightUnit(u);
+    savePref(heightUnit, u);
   };
 
   const handleContinue = async () => {
     const error = validate();
     if (error) {
-      Alert.alert("Hold on", error);
+      alert("Hold on", error);
       return;
     }
 
@@ -72,30 +133,46 @@ export default function Profile() {
       await api.put("/profile", {
         name: form.name.trim(),
         bio: form.bio.trim(),
-        gender: form.gender,
-        heightCm: height,
-        weightKg: weight,
+        gender: form.gender, // required
+        heightCm: Number(metricHeight),
+        weightKg: Number(metricWeight),
       });
-      router.push("/(onBoarding)/bmi");
+      router.push("/(onBoarding)/goal");
     } catch (error) {
-      console.log("STATUS:", error.response?.status);
-      console.log("DATA:", error.response?.data);
-      console.log("MESSAGE:", error.message);
-      Alert.alert("Error", error.response?.data?.message || "Failed to save");
+      alert("Error", error.response?.data?.message || "Failed to save");
     } finally {
       setIsSaving(false);
     }
   };
+
+  const UnitToggle = ({ units, active, onPick }) => (
+    <View style={styles.unitToggle}>
+      {units.map((u) => (
+        <TouchableOpacity
+          key={u}
+          style={[styles.unitPill, active === u && styles.unitPillActive]}
+          onPress={() => onPick(u)}
+        >
+          <Text style={[styles.unitText, active === u && styles.unitTextActive]}>
+            {u === "ft" ? "ft/in" : u}
+          </Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
 
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
-      <View style={styles.container}>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.card}>
-          {/* title */}
-          <Text style={styles.label}>1 of 2</Text>
+          <Text style={styles.label}>1 of 3</Text>
           <Text style={styles.title}>Tell us about yourself</Text>
 
           <View style={styles.formContainer}>
@@ -129,25 +206,17 @@ export default function Profile() {
               </View>
             </View>
 
-            {/* Gender */}
+            {/* Gender (required) */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Gender</Text>
               <View style={styles.genderRow}>
                 {GENDER_OPTIONS.map((option) => (
                   <TouchableOpacity
                     key={option}
-                    style={[
-                      styles.genderPill,
-                      form.gender === option && styles.genderPillActive,
-                    ]}
+                    style={[styles.genderPill, form.gender === option && styles.genderPillActive]}
                     onPress={() => setForm({ ...form, gender: option })}
                   >
-                    <Text
-                      style={[
-                        styles.genderText,
-                        form.gender === option && styles.genderTextActive,
-                      ]}
-                    >
+                    <Text style={[styles.genderText, form.gender === option && styles.genderTextActive]}>
                       {option.charAt(0).toUpperCase() + option.slice(1)}
                     </Text>
                   </TouchableOpacity>
@@ -155,35 +224,71 @@ export default function Profile() {
               </View>
             </View>
 
-            {/* Height & Weight */}
-            <View style={styles.rowContainer}>
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Height (Cm)</Text>
-                <View style={styles.inputRowContainer}>
+            {/* Height */}
+            <View style={styles.inputGroup}>
+              <View style={styles.labelRow}>
+                <Text style={styles.label}>Height</Text>
+                <UnitToggle units={["cm", "ft"]} active={heightUnit} onPick={toggleHeightUnit} />
+              </View>
+              {heightUnit === "cm" ? (
+                <View style={styles.inputContainer}>
                   <TextInput
                     style={styles.input}
                     placeholder="175"
                     placeholderTextColor={COLORS.placeholderText}
-                    value={form.heightCm}
-                    onChangeText={(t) => setForm({ ...form, heightCm: onlyNumber(t) })}
+                    value={metricHeight}
+                    onChangeText={onHeightCm}
                     keyboardType="numeric"
                     maxLength={3}
                   />
                 </View>
-              </View>
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Weight (Kg)</Text>
-                <View style={styles.inputRowContainer}>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="70"
-                    placeholderTextColor={COLORS.placeholderText}
-                    value={form.weightKg}
-                    onChangeText={(t) => setForm({ ...form, weightKg: onlyNumber(t, true) })}
-                    keyboardType="numeric"
-                    maxLength={6}
-                  />
+              ) : (
+                <View style={styles.rowContainer}>
+                  <View style={[styles.inputContainer, { flex: 1 }]}>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="5"
+                      placeholderTextColor={COLORS.placeholderText}
+                      value={ftVal}
+                      onChangeText={onFt}
+                      keyboardType="numeric"
+                      maxLength={1}
+                    />
+                    <Text style={styles.unitSuffix}>ft</Text>
+                  </View>
+                  <View style={[styles.inputContainer, { flex: 1 }]}>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="9"
+                      placeholderTextColor={COLORS.placeholderText}
+                      value={inVal}
+                      onChangeText={onIn}
+                      keyboardType="numeric"
+                      maxLength={2}
+                    />
+                    <Text style={styles.unitSuffix}>in</Text>
+                  </View>
                 </View>
+              )}
+            </View>
+
+            {/* Weight */}
+            <View style={styles.inputGroup}>
+              <View style={styles.labelRow}>
+                <Text style={styles.label}>Weight</Text>
+                <UnitToggle units={["kg", "lb"]} active={weightUnit} onPick={toggleWeightUnit} />
+              </View>
+              <View style={styles.inputContainer}>
+                <TextInput
+                  style={styles.input}
+                  placeholder={weightUnit === "kg" ? "70" : "154"}
+                  placeholderTextColor={COLORS.placeholderText}
+                  value={weightUnit === "kg" ? metricWeight : lbVal}
+                  onChangeText={weightUnit === "kg" ? onWeightKg : onLb}
+                  keyboardType="numeric"
+                  maxLength={6}
+                />
+                <Text style={styles.unitSuffix}>{weightUnit}</Text>
               </View>
             </View>
           </View>
@@ -200,7 +305,7 @@ export default function Profile() {
             )}
           </TouchableOpacity>
         </View>
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }

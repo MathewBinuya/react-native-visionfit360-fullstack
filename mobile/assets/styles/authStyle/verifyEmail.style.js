@@ -9,6 +9,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
   },
   card: {
+    width: "100%", maxWidth: 480, alignSelf: "center",
     backgroundColor: COLORS.cards,
     borderRadius: 20,
     padding: 28,

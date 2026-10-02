@@ -7,13 +7,19 @@
     #hud { position: absolute; top: 20px; left: 0; right: 0; z-index: 10; text-align: center; color: #fff; font-family: sans-serif; }
     #repcount { font-size: 64px; font-weight: bold; }
     #status { font-size: 18px; padding: 0 16px; }
-    #debug { font-size: 16px; color: #FFD700; margin-top: 8px; font-weight: bold; }
+    #debug { font-size: 14px; color: #FFD700; margin-top: 8px; font-weight: bold; white-space: pre-line; }
     #wrap { position: relative; width: 100vw; height: 100vh; }
     video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
     #formBorder {
       position: absolute; inset: 0; z-index: 9; pointer-events: none;
       border: 0px solid transparent; box-sizing: border-box;
       transition: border-color 0.15s ease, border-width 0.15s ease;
+    }
+    /* Slow amber pulse before the countdown ends, so the user sees the app is waiting (not frozen). */
+    #formBorder.amber-pulse { animation: amberPulse 1.6s ease-in-out infinite; }
+    @keyframes amberPulse {
+      0%, 100% { border-color: rgba(245, 166, 35, 0.32); }
+      50%      { border-color: rgba(245, 166, 35, 0.85); }
     }
     #countdownOverlay {
       position: absolute; inset: 0; z-index: 20; display: none;
@@ -24,7 +30,7 @@
       position: relative; width: 170px; height: 170px; border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
       background: conic-gradient(#5DCAA5 var(--progress, 360deg), rgba(255, 255, 255, 0.18) 0deg);
-      transition: background 0.9s linear;
+      transition: background 0.3s linear;
     }
     #countdownInner {
       width: 142px; height: 142px; border-radius: 50%; background: #0a0a0a;
@@ -33,7 +39,21 @@
     #countdownNumber { font-family: sans-serif; font-size: 56px; font-weight: bold; color: #fff; }
     #countdownNumber.pulse { animation: countPulse 0.35s ease-out; }
     @keyframes countPulse { 0% { transform: scale(1.25); opacity: 0.3; } 100% { transform: scale(1); opacity: 1; } }
-    #countdownLabel { margin-top: 20px; font-family: sans-serif; font-size: 18px; color: #fff; opacity: 0.85; }
+    #countdownLabel { margin-top: 20px; font-family: sans-serif; font-size: 18px; color: #fff; opacity: 0.85; text-align: center; padding: 0 24px; }
+
+    /* Tracking-quality chip + tappable setup hint (deadlift back-form aid) */
+    #qualityChip {
+      position: absolute; left: 50%; transform: translateX(-50%);
+      bottom: calc(18px + env(safe-area-inset-bottom, 0px)); z-index: 15; display: none;
+      background: rgba(0, 0, 0, 0.62); color: #FFD24A; font-family: sans-serif; font-size: 13px;
+      font-weight: bold; padding: 8px 14px; border-radius: 18px; border: 1px solid rgba(255, 210, 74, 0.5);
+      max-width: 90vw; text-align: center;
+    }
+    #setupHint {
+      position: absolute; left: 16px; right: 16px; bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+      z-index: 16; display: none; background: rgba(18, 18, 18, 0.93); color: #fff; font-family: sans-serif;
+      font-size: 13px; line-height: 1.55; padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(93, 202, 165, 0.4);
+    }
   </style>
 </head>
 <body>
@@ -46,6 +66,9 @@
     <video id="video" autoplay playsinline muted></video>
     <canvas id="canvas"></canvas>
     <div id="formBorder"></div>
+    <div id="qualityChip"></div>
+    <div id="setupHint"></div>
+
     <div id="countdownOverlay">
       <div id="countdownRing"><div id="countdownInner"><div id="countdownNumber">5</div></div></div>
       <div id="countdownLabel">Get into position</div>
@@ -53,6 +76,18 @@
   </div>
 
   <script>
+    /* =========================================================================
+       VisionFit 360 — posedetect.html
+       Pose-estimation-based exercise form analysis (MediaPipe Pose Landmarker).
+
+       IMPORTANT SCOPE NOTE:
+       This is pose-estimation-based form analysis, NOT medical-grade biomechanics.
+       MediaPipe does not provide vertebra-level landmarks, so nothing here is
+       "direct spinal curvature detection". Deadlift analysis = trunk-alignment
+       proxy + hip-hinge analysis + knee-position analysis + temporal rule-based
+       validation + OPTIONAL experimental ML augmentation.
+       ========================================================================= */
+
     function send(obj) {
       if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(obj));
       if (obj.type === 'counter') document.getElementById('repcount').textContent = obj.current_count;
@@ -61,11 +96,41 @@
     const params = new URLSearchParams(window.location.search);
     const exercise = params.get('exercise') || 'squat';
 
-    // ---- A/B SWITCHES: override from the page URL, e.g. ...?exercise=squat&angles=2d&gate=0&variant=heavy ----
-    const USE_WORLD_ANGLES = params.get('angles') !== '2d';       // 3D joint angles (&angles=2d = old image-pixel angles)
-    const USE_BODY_SCALE   = params.get('scale') !== '0';         // distance-scaled pixel thresholds (&scale=0 = old fixed pixels)
-    const COUNT_MIN_VIS    = params.get('gate') === '0' ? 0 : 0.5; // joints below this visibility are ignored when counting (&gate=0 = off)
+    // ---- A/B SWITCHES (override from the page URL) ----
+    const USE_WORLD_ANGLES = params.get('angles') !== '2d';        // 3D joint angles (&angles=2d = image-pixel angles)
+    const USE_BODY_SCALE   = params.get('scale')  !== '0';         // body-relative pixel thresholds (&scale=0 = fixed pixels)
+    const COUNT_MIN_VIS    = params.get('gate') === '0' ? 0 : 0.5; // joints below this visibility are ignored when counting
     const VARIANT = ['lite', 'full', 'heavy'].includes(params.get('variant')) ? params.get('variant') : 'full';
+
+    // ---- DEADLIFT-SPECIFIC SWITCHES ----
+    // dlmode: rules (default) | ml | hybrid.  dlvar: standard (default) | rdl | sumo.
+    const DLMODE = ['rules', 'ml', 'hybrid'].includes(params.get('dlmode')) ? params.get('dlmode') : 'rules';
+    const DLVAR  = ['standard', 'rdl', 'sumo'].includes(params.get('dlvar')) ? params.get('dlvar') : 'standard';
+    const DL_RECORD = params.get('dlrec') === '1';                 // per-REP recording mode for training data
+    const DL_REC_FRAME = params.get('dlrecframe') === '1';         // per-FRAME back-posture label mode (threshold tuning)
+    const DL_LABEL  = params.get('dllabel') === 'bad' ? 0 : 1;     // 1 = good form, 0 = bad form (for recording)
+    // 2b.5: per-rep severity label for recording — good | mild | obvious (?dlsev=). 'good' keeps label 1.
+    const DL_SEV = ['good', 'mild', 'obvious'].includes(params.get('dlsev')) ? params.get('dlsev')
+                 : (DL_LABEL === 1 ? 'good' : 'obvious');
+    const DL_PERSON = params.get('person') || 'p1';                // person id for person-grouped validation
+
+    /* ---- MINIMAL UI (presentation only) ----
+       Camera view shows ONLY: camera + skeleton, rep count, countdown ring/number, and the border.
+       All status/debug/fps/quality/setup/countdown-label text is hidden. ?ui=full (or ?debug=1)
+       restores the old text/debug UI for development. Nothing about detection/counting changes. */
+    const MINIMAL_UI = params.get('ui') !== 'full' && params.get('debug') !== '1';
+
+    // Rep-verdict border flash (presentation only; does NOT touch committedState / counting).
+    const VERDICT_GOOD_MS = 600;   // green flash when a rep is COUNTED
+    const VERDICT_BAD_MS  = 900;   // red flash when a rep is NOT counted (incl. depth/lockout/incomplete)
+    const VERDICT_AMBER_MS = 700;  // amber flash when a rep is UNVERIFIED (2b.1) — not counted, not bad
+    // 2b.1: if true, an UNVERIFIED rep (too little judgeable coverage) is evaluated/counted normally.
+    const UNVERIFIED_REP_COUNTS = false;
+    // Optional: if true, any confirmed RED (committedState==='bad') during a rep makes that rep NOT count.
+    // Default false -> existing counting rules stand and the verdict flash shows the real outcome.
+    const STRICT_RED_FAILS_REP = false;
+    // Optional: short vibration on a not-counted rep (navigator.vibrate + a 'haptic' message to RN).
+    const HAPTICS = false;
 
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
@@ -73,13 +138,14 @@
     const debugEl = document.getElementById('debug');
     const statusEl = document.getElementById('status');
     const formBorder = document.getElementById('formBorder');
+    const qualityChip = document.getElementById('qualityChip');
+    const setupHint = document.getElementById('setupHint');
 
-    let detector = null, count = 0, stage = 'up', formIsGood = true, lastAngle = 180;
-    let formMsg = '', lastVideoTime = -1;
-    const MIN_SCORE = 0.5;   // skeleton drawing threshold
-    const SKELETON_COLOR = '#000000';   // gray skeleton lines/dots — set to '#000000' for black
+    let detector = null, count = 0, badCount = 0, unverifiedCount = 0, lastAngle = 180;
+    let NOW = 0;                                 // performance.now() for the current frame (also used by replay hook)
+    const MIN_SCORE = 0.5;                       // skeleton drawing threshold
+    const SKELETON_COLOR = '#000000';
 
-    // Paste the exact MediaPipe version here to pin it (see note under the code). Empty = latest, same as before.
     const MP_VERSION = '';
     const MP = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision' + (MP_VERSION ? '@' + MP_VERSION : '');
     const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_' +
@@ -87,36 +153,63 @@
     const MODEL_LOAD_TIMEOUT_MS = 60000;
 
     // ---- BODY-SCALE NORMALIZATION ----
+    // Torso length (shoulder->hip) is the reference. REF_TORSO_PX is a practical baseline;
+    // NOTE: a single camera resolution does not represent all real-world geometry, so we clamp
+    // bodyScale to a safe range and never treat it as an absolute physical measurement.
     const REF_TORSO_PX = 110;
     let torsoPx = 0, bodyScale = 1;
 
-    // ---- SIDE SELECTION (used only by exercises still on single-side tracking) ----
+    // ---- SIDE SELECTION (with hysteresis + dwell so occlusion doesn't flip sides) ----
     const SIDE_SWITCH_MARGIN = 0.4;
+    const SIDE_SWITCH_MIN_MS = 600;
     let activeSide = 'left';
+    let lastSideSwitchMs = 0;
 
-    // add ?debug=0 to hide the yellow debug line and the grey readout
+    // ---- FORM / REP TIMING CONSTANTS ----
+    const REST_RESET_MS = 2500;     // if resting (ready) this long, clear temporary bad-form state
+    const POSE_GAP_MS   = 700;      // generic: brief disappearance -> reset incomplete rep, no count
+    const POSE_GAP_DL_MS = 1100;    // deadlift tolerates slightly longer gaps
+
     const fpsEl = document.createElement('div');
-    fpsEl.style.cssText = 'font-size:12px;color:#9aa0a6;margin-top:4px;';
+    fpsEl.style.cssText = 'font-size:12px;color:#9aa0a6;margin-top:4px;white-space:pre-line;';
     document.getElementById('hud').appendChild(fpsEl);
-    if (params.get('debug') === '0') { debugEl.style.display = 'none'; fpsEl.style.display = 'none'; }
+    const DEBUG_ON = params.get('debug') !== '0';
+    if (!DEBUG_ON) { debugEl.style.display = 'none'; fpsEl.style.display = 'none'; }
 
-    let frameCount = 0, lastFpsTime = performance.now(), delegateName = '';
+    // MINIMAL_UI: hide ALL on-screen text so the camera view shows only skeleton + rep count +
+    // countdown ring/number + border. (Detection code still runs and still writes to these hidden
+    // elements; the writes are simply invisible — see also the guards in dlQuality()/showFatal().)
+    if (MINIMAL_UI) {
+      statusEl.style.display = 'none';
+      debugEl.style.display = 'none';
+      fpsEl.style.display = 'none';
+      if (qualityChip) qualityChip.style.display = 'none';
+      if (setupHint) setupHint.style.display = 'none';
+      const cl = document.getElementById('countdownLabel'); if (cl) cl.style.display = 'none';
+    }
+
+    let frameCount = 0, lastFpsTime = performance.now(), delegateName = '', curFps = 0;
     setInterval(() => {
       const now = performance.now();
-      const fps = frameCount / ((now - lastFpsTime) / 1000);
-      fpsEl.textContent = [
-        VARIANT, delegateName || '...', fps.toFixed(1) + ' fps',
-        USE_WORLD_ANGLES ? '3D' : '2D',
-        COUNT_MIN_VIS ? 'gate' : 'nogate',
-        USE_BODY_SCALE ? 'scale' : 'noscale',
-        torsoPx ? 'torso ' + Math.round(torsoPx) + 'px' : 'torso -',
-      ].join(' · ');
+      curFps = frameCount / ((now - lastFpsTime) / 1000);
+      if (DEBUG_ON) {
+        fpsEl.textContent = [
+          VARIANT, delegateName || '...', curFps.toFixed(1) + ' fps',
+          USE_WORLD_ANGLES ? '3D' : '2D',
+          COUNT_MIN_VIS ? 'gate' : 'nogate',
+          USE_BODY_SCALE ? 'scale' : 'noscale',
+          torsoPx ? 'torso ' + Math.round(torsoPx) + 'px' : 'torso -',
+          exercise === 'deadlift' ? ('dl:' + DLMODE + '/' + DLVAR + (dlModel ? ' model' : ' no-model') + (mlAllowedNow() ? ' ml-on' : ' ml-off')) : '',
+        ].filter(Boolean).join(' · ');
+      }
       frameCount = 0;
       lastFpsTime = now;
     }, 1000);
 
+    // ---- LANDMARKS (ears 7/8 added as an extra trunk/head-alignment signal for deadlift) ----
     const LM_NAMES = {
-      0: 'nose', 11: 'left_shoulder', 12: 'right_shoulder', 13: 'left_elbow', 14: 'right_elbow',
+      0: 'nose', 7: 'left_ear', 8: 'right_ear',
+      11: 'left_shoulder', 12: 'right_shoulder', 13: 'left_elbow', 14: 'right_elbow',
       15: 'left_wrist', 16: 'right_wrist', 23: 'left_hip', 24: 'right_hip',
       25: 'left_knee', 26: 'right_knee', 27: 'left_ankle', 28: 'right_ankle',
     };
@@ -139,61 +232,68 @@
       ['right_hip','right_knee'],['right_knee','right_ankle'],
     ];
 
+    // ---- GEOMETRY ----
     function angle2D(a, b, c) {
       const ab = { x: a.x - b.x, y: a.y - b.y };
       const cb = { x: c.x - b.x, y: c.y - b.y };
       const dot = ab.x * cb.x + ab.y * cb.y;
-      const magAB = Math.sqrt(ab.x*ab.x + ab.y*ab.y);
-      const magCB = Math.sqrt(cb.x*cb.x + cb.y*cb.y);
+      const magAB = Math.hypot(ab.x, ab.y), magCB = Math.hypot(cb.x, cb.y);
       if (magAB === 0 || magCB === 0) return lastAngle;
-      const cos = Math.max(-1, Math.min(1, dot / (magAB * magCB)));
-      return Math.acos(cos) * (180 / Math.PI);
+      return Math.acos(Math.max(-1, Math.min(1, dot / (magAB * magCB)))) * (180 / Math.PI);
     }
     function angle3D(a, b, c) {
       const ab = { x: a.wx - b.wx, y: a.wy - b.wy, z: a.wz - b.wz };
       const cb = { x: c.wx - b.wx, y: c.wy - b.wy, z: c.wz - b.wz };
       const dot = ab.x * cb.x + ab.y * cb.y + ab.z * cb.z;
-      const magAB = Math.sqrt(ab.x*ab.x + ab.y*ab.y + ab.z*ab.z);
-      const magCB = Math.sqrt(cb.x*cb.x + cb.y*cb.y + cb.z*cb.z);
+      const magAB = Math.hypot(ab.x, ab.y, ab.z), magCB = Math.hypot(cb.x, cb.y, cb.z);
       if (magAB === 0 || magCB === 0) return lastAngle;
-      const cos = Math.max(-1, Math.min(1, dot / (magAB * magCB)));
-      return Math.acos(cos) * (180 / Math.PI);
+      return Math.acos(Math.max(-1, Math.min(1, dot / (magAB * magCB)))) * (180 / Math.PI);
     }
     function ang(a, b, c) {
       if (USE_WORLD_ANGLES && a.wx !== undefined && b.wx !== undefined && c.wx !== undefined) return angle3D(a, b, c);
       return angle2D(a, b, c);
     }
+    function dist3D(a, b) {
+      if (a.wx !== undefined && b.wx !== undefined) return Math.hypot(a.wx - b.wx, a.wy - b.wy, a.wz - b.wz);
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    }
+    // Deviation of a segment from true vertical, in degrees (0 = perfectly upright).
+    function verticalDeg(top, bottom) {
+      const dx = Math.abs(top.x - bottom.x), dy = Math.abs(top.y - bottom.y);
+      return Math.atan2(dx, Math.max(dy, 1e-6)) * (180 / Math.PI);
+    }
 
-    function kp(keypoints, name) {
+    // ---- KEYPOINT ACCESS ----
+    function kp(keypoints, name) {                 // visibility-gated (for counting / form)
       const k = keypoints.find(k => k.name === name);
       if (!k) return undefined;
       if (COUNT_MIN_VIS && k.score < COUNT_MIN_VIS) return undefined;
       return k;
     }
     function kpRaw(keypoints, name) { return keypoints.find(k => k.name === name); }
+    function jointVisible(keypoints, joint) {       // either side visible at >=0.5
+      const l = kpRaw(keypoints, 'left_' + joint), r = kpRaw(keypoints, 'right_' + joint);
+      return (l && (l.score ?? 1) >= 0.5) || (r && (r.score ?? 1) >= 0.5);
+    }
 
-    // NEW: computes an angle using both left and right sides and averages them when both
-    // are visible — for exercises done with both limbs together (front raise, bicep curl,
-    // lateral raise, push-up). Falls back to a single side if the other is occluded/out of frame.
+    // Average left+right of a joint-angle when both sides visible; else fall back to one side.
     function angBoth(keypoints, jointA, jointB, jointC) {
       const lA = kp(keypoints, 'left_' + jointA), lB = kp(keypoints, 'left_' + jointB), lC = kp(keypoints, 'left_' + jointC);
       const rA = kp(keypoints, 'right_' + jointA), rB = kp(keypoints, 'right_' + jointB), rC = kp(keypoints, 'right_' + jointC);
-      const leftOk = lA && lB && lC;
-      const rightOk = rA && rB && rC;
-      if (leftOk && rightOk) {
-        const l = ang(lA, lB, lC), r = ang(rA, rB, rC);
-        return { value: (l + r) / 2, sides: 'both' };
-      }
+      const leftOk = lA && lB && lC, rightOk = rA && rB && rC;
+      if (leftOk && rightOk) return { value: (ang(lA, lB, lC) + ang(rA, rB, rC)) / 2, sides: 'both' };
       if (leftOk) return { value: ang(lA, lB, lC), sides: 'left' };
       if (rightOk) return { value: ang(rA, rB, rC), sides: 'right' };
       return null;
     }
 
-    let smoothHistory = [];
-    function smooth(val) {
-      smoothHistory.push(val);
-      if (smoothHistory.length > 4) smoothHistory.shift();
-      return smoothHistory.reduce((a, b) => a + b, 0) / smoothHistory.length;
+    // ---- SMOOTHING: keyed EMA (no per-frame allocation, no cross-signal contamination) ----
+    const ema = {};
+    function smoothV(key, val, alpha) {
+      alpha = alpha === undefined ? 0.4 : alpha;
+      if (ema[key] === undefined) ema[key] = val;
+      else ema[key] = ema[key] * (1 - alpha) + val * alpha;
+      return ema[key];
     }
 
     function pickSide(keypoints, joints) {
@@ -202,10 +302,12 @@
         return t + (k && k.score ? k.score : 0);
       }, 0);
       const l = sideScore('left'), r = sideScore('right');
-      let next = activeSide;
-      if (activeSide === 'left' && r > l + SIDE_SWITCH_MARGIN) next = 'right';
-      else if (activeSide === 'right' && l > r + SIDE_SWITCH_MARGIN) next = 'left';
-      if (next !== activeSide) { activeSide = next; smoothHistory = []; }
+      if (NOW - lastSideSwitchMs >= SIDE_SWITCH_MIN_MS) {
+        let next = activeSide;
+        if (activeSide === 'left' && r > l + SIDE_SWITCH_MARGIN) next = 'right';
+        else if (activeSide === 'right' && l > r + SIDE_SWITCH_MARGIN) next = 'left';
+        if (next !== activeSide) { activeSide = next; lastSideSwitchMs = NOW; }
+      }
       return activeSide;
     }
 
@@ -213,11 +315,10 @@
       if (!USE_BODY_SCALE) { bodyScale = 1; return; }
       const lens = [];
       ['left', 'right'].forEach(side => {
-        const s = kp(keypoints, side + '_shoulder');
-        const h = kp(keypoints, side + '_hip');
+        const s = kp(keypoints, side + '_shoulder'), h = kp(keypoints, side + '_hip');
         if (s && h) {
           const dx = Math.abs(s.x - h.x), dy = Math.abs(s.y - h.y);
-          if (dy > 0 && dx < dy * 0.6) lens.push(Math.sqrt(dx * dx + dy * dy));
+          if (dy > 0 && dx < dy * 0.6) lens.push(Math.hypot(dx, dy));
         }
       });
       if (!lens.length) return;
@@ -231,371 +332,1375 @@
       if (!k) return k;
       if (!kpHistory[k.name]) kpHistory[k.name] = { x: k.x, y: k.y };
       const prev = kpHistory[k.name];
-      const sx = prev.x * 0.5 + k.x * 0.5;
-      const sy = prev.y * 0.5 + k.y * 0.5;
+      const sx = prev.x * 0.5 + k.x * 0.5, sy = prev.y * 0.5 + k.y * 0.5;
       kpHistory[k.name] = { x: sx, y: sy };
       return { ...k, x: sx, y: sy };
     }
 
+    /* =========================================================================
+       FORM STATE: 'good' | 'bad' | 'unknown'
+       - unknown = not enough evidence (e.g. missing landmarks). NEVER auto-"bad".
+       - stale GOOD is avoided: every frame re-derives the state.
+       ========================================================================= */
+    // formState/formMsg are the RAW per-frame intent each detector writes. They are NOT shown
+    // directly — commitForm() (below) applies temporal hysteresis so the border/message never
+    // flicker on one noisy frame.
+    let formState = 'unknown', formMsg = '';
+    function setForm(state, msg) { formState = state; formMsg = (state === 'bad') ? (msg || '') : ''; }
+    // Lets a detector carry a message on GOOD/UNKNOWN too (e.g. "Good form - straight back",
+    // or a non-accusatory amber reason) without implying bad form.
+    function setFormRaw(state, msg) { formState = state; formMsg = msg || ''; }
+
+    /* =========================================================================
+       CENTRALIZED FORM-STATE COMMIT LAYER (one place; every exercise shares it)
+       Raw per-frame state -> temporally-confirmed committed state that drives BOTH the
+       AR border colour and the `form` message (so they always agree).
+       - A state change must persist for its confirm window before it is committed
+         (hysteresis) -> a single noisy frame never flips the border.
+       - Priority once confirmed: BAD (red) > GOOD (green) > UNKNOWN (amber).
+       - RED is LATCHED for RED_LATCH_MS after a confirmed fault so the user actually sees it.
+       - GREEN is only shown on positive good evidence, never merely because BAD wasn't seen.
+       ========================================================================= */
+    const COMMIT_BAD_MS = 150;      // NEW: raw 'bad' must hold this long before the border goes RED
+    const COMMIT_GOOD_MS = 250;     // NEW: raw 'good' must hold this long before returning to GREEN
+    const COMMIT_UNKNOWN_MS = 200;  // NEW: raw 'unknown' must hold this long before going AMBER
+    const RED_LATCH_MS = 800;       // NEW: keep RED on screen at least this long after a confirmed fault
+    let committedState = 'unknown', committedMsg = '';
+    let rawRun = null, rawRunSince = 0, redUntil = 0;
+
+    let lastFormSent = null;
+    function resetFormCommit() {
+      committedState = 'unknown'; committedMsg = '';
+      rawRun = null; rawRunSince = 0; redUntil = 0; lastFormSent = null;
+    }
+    function commitForm() {
+      if (formState !== rawRun) { rawRun = formState; rawRunSince = NOW; }
+      // RED latch: hold red briefly after a confirmed fault so it's actually visible.
+      if (committedState === 'bad' && NOW < redUntil) {
+        if (formState === 'bad') { committedMsg = formMsg || committedMsg; redUntil = Math.max(redUntil, NOW + RED_LATCH_MS); }
+        return;
+      }
+      if (formState === committedState) {
+        committedMsg = committedState === 'good' ? (formMsg || 'Good form')
+                     : committedState === 'bad' ? (formMsg || committedMsg || 'Fix your form')
+                     : (formMsg || 'Position unclear');
+        return;
+      }
+      const need = formState === 'bad' ? COMMIT_BAD_MS : formState === 'good' ? COMMIT_GOOD_MS : COMMIT_UNKNOWN_MS;
+      if (NOW - rawRunSince >= need) {
+        committedState = formState;
+        committedMsg = formState === 'good' ? (formMsg || 'Good form')
+                     : formState === 'bad' ? (formMsg || 'Fix your form') : (formMsg || 'Position unclear');
+        if (formState === 'bad') redUntil = NOW + RED_LATCH_MS;
+      }
+      // else: hold the previous committed state through brief noise.
+    }
+
+    // REP-VERDICT FLASH (presentation only): briefly overrides the border with the real counting
+    // decision when a rep finishes, so a rep rejected for depth/lockout/form is never silent.
+    // It does NOT modify committedState, so __form / __dlSelfTest are unaffected.
+    // kind: 'good' (counted) | 'bad' (not counted) | 'amber' (UNVERIFIED — 2b.1)
+    let verdictUntil = 0, verdictKind = null;
+    function flashVerdict(kind) {
+      if (kind === true) kind = 'good'; else if (kind === false) kind = 'bad';   // back-compat
+      verdictKind = kind;
+      verdictUntil = NOW + (kind === 'good' ? VERDICT_GOOD_MS : kind === 'bad' ? VERDICT_BAD_MS : VERDICT_AMBER_MS);
+    }
+
+    // AR border: GREEN = good form / rep counted, RED = bad form / rep not counted, AMBER = unclear/not ready.
+    // Widths are distinct per state (good thin, amber medium, bad thick) so states read without colour.
+    function applyBorder(state) {
+      if (NOW < verdictUntil && verdictKind) {               // verdict flash wins while active
+        if (verdictKind === 'good') { formBorder.style.borderColor = 'rgba(46,204,113,0.95)'; formBorder.style.borderWidth = '14px'; }
+        else if (verdictKind === 'amber') { formBorder.style.borderColor = 'rgba(245,166,35,0.95)'; formBorder.style.borderWidth = '18px'; }
+        else { formBorder.style.borderColor = '#E24B4A'; formBorder.style.borderWidth = '26px'; }
+        return;
+      }
+      if (state === 'good') { formBorder.style.borderColor = 'rgba(29,158,117,0.65)'; formBorder.style.borderWidth = '8px'; }
+      else if (state === 'bad') { formBorder.style.borderColor = '#E24B4A'; formBorder.style.borderWidth = '22px'; }
+      else { formBorder.style.borderColor = 'rgba(245,166,35,0.6)'; formBorder.style.borderWidth = '10px'; } // amber = unknown
+    }
+
+    function sendFormIfChanged() {
+      const key = committedState + '|' + committedMsg;
+      if (key === lastFormSent) return;
+      lastFormSent = key;
+      // `good` kept for backward compatibility: true unless confirmed BAD (AMBER never shows a red border downstream).
+      send({ type: 'form', good: committedState !== 'bad', state: committedState, msg: committedMsg });
+    }
+
+    /* =========================================================================
+       REP LIFECYCLE ENGINE
+       READY -> (enter) ACTIVE -> track extreme & accumulate form evidence -> (exit) VALID / INVALID
+       - hysteresis (enter != exit)
+       - debounce (min ms between reps)
+       - depth/lockout validation via tracked extreme
+       - bad-form evidence ratio over the rep
+       ========================================================================= */
+    const R = {
+      stage: 'ready', lastRepMs: 0, readySinceMs: 0,
+      extreme: null, activeFrames: 0, evalFrames: 0, badFrames: 0, repValid: true,
+    };
+
     function rep() {
       count++;
       send({ type: 'counter', current_count: count });
-      statusEl.textContent = 'REP ' + count + '!';
+      statusEl.textContent = 'REP ' + count + '!';   // (hidden in MINIMAL_UI; kept for ?ui=full)
       statusEl.style.color = '#5DCAA5';
+      flashVerdict(true);                             // GREEN flash: rep counted
+    }
+    // 2b.1: UNVERIFIED rep — we could not judge enough of it. NOT counted and NOT a bad rep.
+    function repUnverified(reason) {
+      unverifiedCount++;
+      send({ type: 'rep_unverified', current_unverified: unverifiedCount, reason: reason || 'Could not verify this rep' });
+      statusEl.textContent = reason || 'Could not verify this rep';   // hidden in MINIMAL_UI
+      statusEl.style.color = '#FFD24A';
+      flashVerdict('amber');
+    }
+    function badRep(reason) {
+      badCount++;
+      send({ type: 'bad_rep', current_bad: badCount, reason: reason || 'Fix your form' });
+      statusEl.textContent = reason || 'Fix your form';
+      statusEl.style.color = '#E24B4A';
+      flashVerdict(false);                            // RED flash: rep NOT counted
+      if (HAPTICS) { try { if (navigator.vibrate) navigator.vibrate(200); } catch (e) {} send({ type: 'haptic', ms: 200 }); }
     }
 
-    function countRep(primaryAngle, downThreshold, upThreshold) {
-      if (primaryAngle < downThreshold && stage === 'up') stage = 'down';
-      if (primaryAngle > upThreshold && stage === 'down') { stage = 'up'; rep(); }
+    function repStart(onActive) {
+      R.stage = 'active';
+      R.activeFrames = 0; R.evalFrames = 0; R.badFrames = 0; R.extreme = null; R.repValid = true;
+      if (onActive) onActive();
+    }
+    function repFrame(evaluable, bad, metric, track) {
+      R.activeFrames++;
+      if (evaluable) { R.evalFrames++; if (bad) R.badFrames++; }
+      if (metric !== undefined && metric !== null) {
+        if (R.extreme === null) R.extreme = metric;
+        else R.extreme = track === 'min' ? Math.min(R.extreme, metric) : Math.max(R.extreme, metric);
+      }
+    }
+    // Returns: 'good' | 'bad' | 'debounced' | 'tooShort'
+    function repFinish(cfg) {
+      R.stage = 'ready'; R.readySinceMs = NOW;
+      if (NOW - R.lastRepMs < (cfg.debounceMs || 300)) return 'debounced';
+      if (R.activeFrames < (cfg.minActiveFrames || 2)) return 'tooShort';
+      R.lastRepMs = NOW;
+      let complete = true, reason = '';
+      if (cfg.target !== undefined && R.extreme !== null) {
+        complete = cfg.track === 'min' ? R.extreme <= cfg.target : R.extreme >= cfg.target;
+        if (!complete) reason = cfg.incompleteMsg || 'Incomplete rep';
+      }
+      const badRatio = R.evalFrames ? R.badFrames / R.evalFrames : 0;
+      const formBad = R.evalFrames >= (cfg.minEvalFrames || 3) && badRatio > (cfg.badRatio || 0.4);
+      const strictBad = STRICT_RED_FAILS_REP && committedState === 'bad';  // optional flag (default off)
+      if (!complete || formBad || strictBad) { badRep(reason || cfg.formMsg || 'Fix your form'); return 'bad'; }
+      rep(); return 'good';
     }
 
-    let lastFormSent = null;
-    function sendFormIfChanged() {
-      const key = formIsGood + '|' + formMsg;
-      if (key === lastFormSent) return;
-      lastFormSent = key;
-      send({ type: 'form', good: formIsGood, msg: formMsg });
+    // Generic threshold-driven rep (hysteresis + extreme tracking + form evidence).
+    function runRep(o) {
+      const below = o.activeWhenBelow, m = o.metric;
+      if (R.stage === 'active') repFrame(o.formEvaluable, o.formBad, m, below ? 'min' : 'max');
+      const entering = below ? (m < o.enter) : (m > o.enter);
+      const exiting  = below ? (m > o.exit)  : (m < o.exit);
+      if (R.stage === 'ready' && entering) repStart(o.onActive);
+      else if (R.stage === 'active' && exiting) repFinish({
+        debounceMs: o.debounceMs, minActiveFrames: o.minActiveFrames, minEvalFrames: o.minEvalFrames,
+        badRatio: o.badRatio, target: o.target, track: below ? 'min' : 'max',
+        incompleteMsg: o.incompleteMsg, formMsg: o.formMsg,
+      });
     }
 
+    function sayActive(text) { statusEl.textContent = text; statusEl.style.color = '#5DCAA5'; }
+
+    /* =========================================================================
+       DEADLIFT ML SUBSYSTEM (built here — the file previously had none).
+       Rules/ML/hybrid with a SAFETY GATE: ML only influences hybrid mode when the
+       stored model metadata has validated===true. Default is validated:false, so an
+       unvalidated experimental model never silently affects production decisions.
+       ========================================================================= */
+    const DL_ROWS_KEY = 'vf_dl_rows_v3';   // v3: rules-based 9-feature vector (spine experiment removed)
+    const DL_MODEL_KEY = 'vf_dl_model_v3';
+    let dlRows = [];
+    let dlModel = null;
+
+    try { dlRows = JSON.parse(localStorage.getItem(DL_ROWS_KEY) || '[]') || []; } catch (e) { dlRows = []; }
+    try { dlModel = JSON.parse(localStorage.getItem(DL_MODEL_KEY) || 'null'); } catch (e) { dlModel = null; }
+
+    function mlAllowedNow() {
+      if (exercise !== 'deadlift') return false;
+      if (DLMODE === 'ml') return true;
+      if (DLMODE === 'hybrid') return !!(dlModel && dlModel.meta && dlModel.meta.validated === true);
+      return false; // rules mode -> never
+    }
+
+    // --- tiny ML math ---
+    function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+    function standParams(X) {
+      const d = X[0].length, n = X.length, mean = new Array(d).fill(0), std = new Array(d).fill(0);
+      for (const r of X) for (let j = 0; j < d; j++) mean[j] += r[j];
+      for (let j = 0; j < d; j++) mean[j] /= n;
+      for (const r of X) for (let j = 0; j < d; j++) std[j] += (r[j] - mean[j]) ** 2;
+      for (let j = 0; j < d; j++) { std[j] = Math.sqrt(std[j] / n) || 1; }
+      return { mean, std };
+    }
+    function stand(r, mean, std) { return r.map((v, j) => (v - mean[j]) / std[j]); }
+    function dist(a, b) { let s = 0; for (let j = 0; j < a.length; j++) s += (a[j] - b[j]) ** 2; return Math.sqrt(s); }
+
+    function trainLR(X, y, iters, lr, l2) {
+      iters = iters || 300; lr = lr || 0.1; l2 = l2 === undefined ? 0.001 : l2;
+      const n = X.length, d = X[0].length; let w = new Array(d).fill(0), b = 0;
+      for (let it = 0; it < iters; it++) {
+        const gw = new Array(d).fill(0); let gb = 0;
+        for (let i = 0; i < n; i++) {
+          let z = b; for (let j = 0; j < d; j++) z += w[j] * X[i][j];
+          const p = 1 / (1 + Math.exp(-z)), e = p - y[i];
+          for (let j = 0; j < d; j++) gw[j] += e * X[i][j];
+          gb += e;
+        }
+        for (let j = 0; j < d; j++) w[j] -= lr * (gw[j] / n + l2 * w[j]);
+        b -= lr * gb / n;
+      }
+      return { w, b };
+    }
+    function predLR(m, x) { let z = m.b; for (let j = 0; j < x.length; j++) z += m.w[j] * x[j]; return 1 / (1 + Math.exp(-z)); }
+    function predKNN(rows, x, k) {
+      k = k || 5;
+      const ds = rows.map(r => ({ d: dist(r.x, x), y: r.y })).sort((a, b) => a.d - b.d).slice(0, Math.min(k, rows.length));
+      return ds.length ? ds.reduce((s, o) => s + o.y, 0) / ds.length : 0.5;
+    }
+    function gini(y) { if (!y.length) return 0; const p = y.reduce((a, b) => a + b, 0) / y.length; return 1 - p * p - (1 - p) * (1 - p); }
+    function buildTree(X, y, depth, maxDepth, minSamples, featSubset) {
+      const p = y.length ? y.reduce((a, b) => a + b, 0) / y.length : 0.5;
+      if (depth >= maxDepth || y.length < minSamples || gini(y) === 0) return { leaf: true, p };
+      const d = X[0].length, feats = featSubset || [...Array(d).keys()];
+      let best = null;
+      for (const j of feats) {
+        const vals = [...new Set(X.map(r => r[j]))].sort((a, b) => a - b);
+        for (let t = 0; t < vals.length - 1; t++) {
+          const thr = (vals[t] + vals[t + 1]) / 2, li = [], ri = [];
+          for (let i = 0; i < X.length; i++) (X[i][j] <= thr ? li : ri).push(i);
+          if (!li.length || !ri.length) continue;
+          const ly = li.map(i => y[i]), ry = ri.map(i => y[i]);
+          const g = (ly.length * gini(ly) + ry.length * gini(ry)) / y.length;
+          if (!best || g < best.g) best = { g, j, thr, li, ri };
+        }
+      }
+      if (!best) return { leaf: true, p };
+      return {
+        leaf: false, j: best.j, thr: best.thr,
+        left: buildTree(best.li.map(i => X[i]), best.li.map(i => y[i]), depth + 1, maxDepth, minSamples, featSubset),
+        right: buildTree(best.ri.map(i => X[i]), best.ri.map(i => y[i]), depth + 1, maxDepth, minSamples, featSubset),
+      };
+    }
+    function predTree(t, x) { while (!t.leaf) t = (x[t.j] <= t.thr ? t.left : t.right); return t.p; }
+    function trainRF(X, y, nTrees, maxDepth) {
+      nTrees = nTrees || 15; maxDepth = maxDepth || 4;
+      const d = X[0].length, mtry = Math.max(1, Math.round(Math.sqrt(d))), trees = [];
+      for (let t = 0; t < nTrees; t++) {
+        const bx = [], by = [];
+        for (let i = 0; i < X.length; i++) { const r = Math.floor(Math.random() * X.length); bx.push(X[r]); by.push(y[r]); }
+        const feats = shuffle([...Array(d).keys()]).slice(0, mtry);
+        trees.push(buildTree(bx, by, 0, maxDepth, 3, feats));
+      }
+      return trees;
+    }
+    function predRF(trees, x) { return trees.reduce((s, t) => s + predTree(t, x), 0) / trees.length; }
+
+    // Leave-One-PERSON-Out cross-validation (person-grouped). Returns per-classifier accuracy.
+    function lopoCV(X, y, persons) {
+      const uniq = [...new Set(persons)];
+      if (uniq.length < 2) return { note: 'need >=2 persons for person-grouped validation' };
+      const correct = { lr: 0, dt: 0, rf: 0, knn: 0, ensemble: 0 }; let total = 0;
+      for (const pz of uniq) {
+        const triX = [], triY = [], teX = [], teY = [];
+        for (let i = 0; i < X.length; i++) {
+          if (persons[i] === pz) { teX.push(X[i]); teY.push(y[i]); } else { triX.push(X[i]); triY.push(y[i]); }
+        }
+        if (!teX.length || !triX.length || new Set(triY).size < 2) continue;
+        const { mean, std } = standParams(triX);
+        const trs = triX.map(r => stand(r, mean, std)), tes = teX.map(r => stand(r, mean, std));
+        const lr = trainLR(trs, triY), forest = trainRF(trs, triY), tree = buildTree(trs, triY, 0, 4, 3, null);
+        const knn = trs.map((x, i) => ({ x, y: triY[i] }));
+        for (let i = 0; i < tes.length; i++) {
+          const x = tes[i];
+          const pl = predLR(lr, x), pd = predTree(tree, x), pr = predRF(forest, x), pk = predKNN(knn, x);
+          const pe = (pl + pd + pr + pk) / 4;
+          if ((pl >= 0.5 ? 1 : 0) === teY[i]) correct.lr++;
+          if ((pd >= 0.5 ? 1 : 0) === teY[i]) correct.dt++;
+          if ((pr >= 0.5 ? 1 : 0) === teY[i]) correct.rf++;
+          if ((pk >= 0.5 ? 1 : 0) === teY[i]) correct.knn++;
+          if ((pe >= 0.5 ? 1 : 0) === teY[i]) correct.ensemble++;
+          total++;
+        }
+      }
+      if (!total) return { note: 'insufficient data across persons' };
+      return {
+        lr: +(correct.lr / total).toFixed(3), dt: +(correct.dt / total).toFixed(3),
+        rf: +(correct.rf / total).toFixed(3), knn: +(correct.knn / total).toFixed(3),
+        ensemble: +(correct.ensemble / total).toFixed(3), n: total,
+      };
+    }
+
+    function trainDeadlift() {
+      if (dlRows.length < 6) { send({ type: 'dl_model', meta: { error: 'need >= 6 recorded reps', nRows: dlRows.length } }); return null; }
+      // Train on a single consistent feature length (point 9): use the most recent length, drop mismatches.
+      const L = dlRows[dlRows.length - 1].f.length;
+      const rows = dlRows.filter(r => r.f && r.f.length === L);
+      if (rows.length < 6) { send({ type: 'dl_model', meta: { error: 'need >= 6 reps at the current feature length', nRows: rows.length, featLen: L } }); return null; }
+      const X = rows.map(r => r.f), y = rows.map(r => r.label), persons = rows.map(r => r.person);
+      const { mean, std } = standParams(X);
+      const Xs = X.map(r => stand(r, mean, std));
+      const lr = trainLR(Xs, y), forest = trainRF(Xs, y), tree = buildTree(Xs, y, 0, 4, 3, null);
+      const knnRows = Xs.map((x, i) => ({ x, y: y[i] }));
+      const accuracy = lopoCV(X, y, persons);
+      dlModel = {
+        mean, std, lr, forest, tree, knnRows,
+        // validated stays FALSE until a real evaluation justifies flipping it (see window.__dlValidate).
+        meta: { trained: true, validated: false, nRows: X.length, featLen: L, nPersons: new Set(persons).size, accuracy, createdAt: Date.now(), variant: DLVAR },
+      };
+      try { localStorage.setItem(DL_MODEL_KEY, JSON.stringify(dlModel)); } catch (e) {}
+      send({ type: 'dl_model', meta: dlModel.meta });
+      return dlModel.meta;
+    }
+    // Returns P(form == good) in [0,1], or null if no model, or if the feature length doesn't match
+    // the model's (point 9: only use the model when the vector length matches what it was trained on).
+    function dlPredictGood(f) {
+      if (!dlModel) return null;
+      if (!dlModel.mean || dlModel.mean.length !== f.length) return null;
+      const x = stand(f, dlModel.mean, dlModel.std);
+      return (predLR(dlModel.lr, x) + predTree(dlModel.tree, x) + predRF(dlModel.forest, x) + predKNN(dlModel.knnRows, x)) / 4;
+    }
+    function dlRecord(f, label) {
+      dlRows.push({ f, label, sev: DL_SEV, person: DL_PERSON, t: Date.now(), variant: DLVAR });
+      try { localStorage.setItem(DL_ROWS_KEY, JSON.stringify(dlRows)); } catch (e) {}
+      send({ type: 'dl_rows', count: dlRows.length, person: DL_PERSON, label, sev: DL_SEV });
+    }
+
+    /* =========================================================================
+       DEADLIFT FEATURE / RULE CONFIG per variant.
+       Thresholds are engineering heuristics, NOT validated biomechanical constants.
+       ========================================================================= */
+    const DL_CFG = {
+      standard: { enterBack: 150, exitBack: 162, hingeBackTarget: 120, lockoutBack: 158, lockoutKnee: 150, kneeShouldBend: true, kneeBendMax: 160, kneeTooBent: 0 },
+      sumo:     { enterBack: 150, exitBack: 162, hingeBackTarget: 128, lockoutBack: 158, lockoutKnee: 150, kneeShouldBend: true, kneeBendMax: 165, kneeTooBent: 0 },
+      // RDL / stiff-leg: knees stay mostly straight; deep knee bend is the fault, not the goal.
+      rdl:      { enterBack: 150, exitBack: 162, hingeBackTarget: 125, lockoutBack: 158, lockoutKnee: 0,   kneeShouldBend: false, kneeBendMax: 0, kneeTooBent: 140 },
+    };
+    const DLC = DL_CFG[DLVAR] || DL_CFG.standard;
+
+    const HIP_RISE_THR = 2.0;   // hips rising this many x faster than chest (heuristic, temporally confirmed)
+
+    /* =========================================================================
+       DEADLIFT BACK-FORM (v2) — INDIRECT proxy for a rounded back.
+       SCOPE NOTE: MediaPipe has NO spine landmarks. This cannot measure spinal
+       curvature; it detects a "possible rounded back" from two proxies, judged
+       against the user's OWN calibrated standing baseline:
+         (A) ear/head -> shoulder -> hip angle DROP vs baseline (neck/upper-trunk).
+         (B) shoulder -> hip length / standing baseline (trunk shortening).
+       A pure forward hinge keeps both near baseline, so forward lean alone is
+       NEVER flagged. A fault needs either signal sustained; both agreeing = higher
+       confidence. This is a form aid, not medical analysis.
+       ---- NEW TUNABLE CONSTANTS (defaults) ---- :
+         BACK_ROUND_DEV   25   deg drop in ear-shoulder-hip vs baseline = suspect
+         BACK_SHRINK_MIN  0.90 shoulder-hip length / baseline below this = suspect
+         BACK_PERSIST_MS  250  live: sustained suspicion before RED
+         BACK_RUN_MS      300  rep-level: any sustained suspect run this long fails the rep
+         BACK_EMA_ALPHA   0.5  light smoothing of the back signals
+         CALIB_MIN_FRAMES 8    standing frames needed before baselines are trusted
+         CALIB_MIN_VIS    0.6  landmark visibility required to use a calibration frame
+         HEAD_MIN_VIS     0.5  head-point (ear/nose) visibility required to trust it
+         FRONT_FACING_MAX 1.0  shoulderWidth/torso above this = too front-on to judge
+         LEAN_BACK_DEG    18   trunk-from-vertical AWAY from facing at lockout = lean-back
+         LEAN_BACK_MS     250  sustained lean-back time before flagging
+         TOO_FAR_TORSO_PX 70   torso shorter than this on screen = "move closer"
+         LOW_FPS          12   below this fps = "low frame rate"
+       ========================================================================= */
+    // Defaults 25 / 0.90. Tunable LIVE from the URL for per-body/per-camera calibration:
+    //   ?rounddev=<deg>   lower = flags neck/upper-back rounding sooner
+    //   ?shrinkmin=<0..1> HIGHER (e.g. 0.95) = flags mid-back rounding (torso shortening) sooner
+    // (These override the default only; they do not change any other behaviour.)
+    const BACK_ROUND_DEV   = (function () { const v = parseFloat(params.get('rounddev'));  return (isFinite(v) && v > 0) ? v : 25; })();
+    // Default raised 0.90 -> 0.93 from real data: a rounded back measured SHRmin 0.91 while standing was
+    // ~0.97, so 0.93 catches the rounding with margin. Tune per body/camera with ?shrinkmin=.
+    const BACK_SHRINK_MIN  = (function () { const v = parseFloat(params.get('shrinkmin')); return (isFinite(v) && v > 0 && v < 1.2) ? v : 0.93; })();
+    const BACK_PERSIST_MS  = 250;
+    const BACK_RUN_MS      = 300;
+    const BACK_EMA_ALPHA   = 0.5;
+    const CALIB_MIN_FRAMES = 8;
+    const CALIB_MIN_VIS    = 0.6;
+    const HEAD_MIN_VIS     = 0.5;
+    const FRONT_FACING_MAX = 1.0;
+    const LEAN_BACK_DEG    = 18;
+    const LEAN_BACK_MS     = 250;
+    const TOO_FAR_TORSO_PX = 70;
+    const LOW_FPS          = 12;
+    const MIN_EVAL_COVERAGE = 0.5;  // fraction of a rep's frames that must be judgeable to trust a back verdict
+    // Gap tolerance for a sustained rounding RUN. The proxy value must bridge the EMA LAG: one dropout
+    // frame pushes the smoothed ear/shrink signals sub-threshold for ~2 frames, so ~1 frame (1.6x) is
+    // not enough. 3x (~150ms at 20fps, well under BACK_RUN_MS) bridges realistic flicker. This is SAFE:
+    // the gap only EXTENDS an existing run (never starts one), and a lone suspect frame never accumulates
+    // runMax — so neutral/jitter reps (zero suspect frames) can't be turned into false BADs.
+    const ROUND_GAP_PROXY = 3.0;    // x measured MediaPipe frame interval
+
+    // ---- ANTI-FALSE-COUNT (a rep must be a real stand -> deep hinge -> stand, not random bending) ----
+    const STAND_TALL_BACK  = 160;   // must straighten to at least this (shoulder-hip-knee) to ARM the next rep
+    const STAND_TALL_KNEE  = 150;   // ...and knees roughly straight  (a real lockout clears exitBack 162 > 160, so consecutive reps re-arm automatically)
+    const HINGE_ATTEMPT_BACK = 135; // a rep must hinge at least this deep to count at all; shallower = ignored (no rep)
+    // Deadlift = hip-hinge (torso leans FORWARD a lot); squat = knee-dominant (torso stays upright).
+    // Require clear forward trunk lean so an upright squat isn't counted as a deadlift. STRICT:
+    // a real deadlift leans ~50-70deg, a squat ~10-25deg, so 40 rejects squats firmly while real
+    // deadlifts still clear it. (Lower toward 30 if it ever skips your reps.)
+    const DEADLIFT_MIN_LEAN = 40;   // deg of peak trunk-from-vertical lean required to count as a deadlift
+
+
+    let dlRoundSince = 0;   // timestamp the current sustained back-round suspicion began (0 = none)
+    let dlRoundLast = 0;    // last frame the suspicion was true (for one-missed-sample tolerance)
+    let dlLeanSince = 0;    // timestamp the current sustained lean-back began (0 = none)
+    let dlArmed = false;    // a rep can only start after the user has stood tall (prevents flailing counting)
+    let dlQualityReasons = []; // current tracking-quality issues (for the chip)
+
+    // Personal calibration baselines (captured standing upright during the countdown + between reps).
+    // PER-HEAD-SOURCE ear baselines (fix): ear vs nose give different ear->shoulder->hip angles, so the
+    // delta must be measured against a baseline for the SAME source used this frame.
+    let dlBase = { shoulderHip: 0, facingSign: 0, n: 0, ear: { ear: { v: 0, n: 0 }, ear2: { v: 0, n: 0 }, nose: { v: 0, n: 0 } } };
+    function dlBaseReady() { return dlBase.n >= CALIB_MIN_FRAMES; }
+    function headBaseReady(src) { return !!(src && dlBase.ear[src] && dlBase.ear[src].n >= 3); }
+
+    // Pick the most reliable head point: near-side ear -> far-side ear -> nose.
+    function bestHead(keypoints, S) {
+      const near = kpRaw(keypoints, S + '_ear');
+      if (near && (near.score ?? 1) >= HEAD_MIN_VIS) return { pt: near, src: 'ear' };
+      const far = kpRaw(keypoints, (S === 'left' ? 'right' : 'left') + '_ear');
+      if (far && (far.score ?? 1) >= HEAD_MIN_VIS) return { pt: far, src: 'ear2' };
+      const nose = kpRaw(keypoints, 'nose');
+      if (nose && (nose.score ?? 1) >= HEAD_MIN_VIS) return { pt: nose, src: 'nose' };
+      return null;
+    }
+
+    // Capture baselines from clearly-upright, good-visibility frames (ignores noisy/low-vis frames).
+    function dlCalibrate(keypoints) {
+      const S = pickSide(keypoints, ['shoulder', 'hip', 'knee']);
+      const sh = kpRaw(keypoints, S + '_shoulder'), hip = kpRaw(keypoints, S + '_hip'), knee = kpRaw(keypoints, S + '_knee');
+      if (!(sh && hip && knee)) return;
+      if ((sh.score ?? 1) < CALIB_MIN_VIS || (hip.score ?? 1) < CALIB_MIN_VIS || (knee.score ?? 1) < CALIB_MIN_VIS) return;
+      if (ang(sh, hip, knee) < 150) return;        // must be roughly upright
+      const head = bestHead(keypoints, S), nose = kpRaw(keypoints, 'nose');
+      const a = 1 / Math.min(dlBase.n + 1, 20);     // running mean, then light EMA
+      if (head) {                                    // per-source ear baseline
+        const ea = ang(head.pt, sh, hip), b = dlBase.ear[head.src];
+        const aa = 1 / Math.min(b.n + 1, 20);
+        b.v = b.n ? b.v * (1 - aa) + ea * aa : ea; b.n++;
+      }
+      const shl = dist3D(sh, hip); dlBase.shoulderHip = dlBase.shoulderHip ? dlBase.shoulderHip * (1 - a) + shl * a : shl;
+      if (nose && (nose.score ?? 1) >= HEAD_MIN_VIS) { const fs = Math.sign(nose.x - sh.x); if (fs) dlBase.facingSign = fs; }
+      dlBase.n++;
+    }
+
+    // Per-rep aggregation for deadlift (running stats, no per-frame arrays).
+    let dlAgg = null;
+    let dlPrevHipY = null, dlPrevShoulderY = null;
+    let dlBaseTorso = 0; // legacy standing torso baseline (kept for the ML feature vector)
+
+    let dlActiveStart = 0;   // timestamp the active phase began (for the SET-UP reference window)
+    let dlFrameDtMs = 50, dlPrevNow = 0;  // measured MediaPipe frame interval (for the proxy gap tolerance)
+    let dlLastPeak = { dEAR: 0, shr: 1 };  // last/current rep's peak back-rounding signals (for tuning readout)
+    function dlResetAgg() {
+      dlAgg = {
+        backMin: 999, backMax: -999, kneeMin: 999, kneeMax: -999,
+        earMin: 999, leanMax: 0, hipRiseMax: 0, shrinkMin: 1, frontSum: 0, frontN: 0,
+        backEvalFrames: 0, runStart: 0, runLast: 0, runMax: 0, leanBackMs: 0, bothAgree: false, frames: 0,
+        earDeltaMax: 0,   // per-rep PEAK neck/upper-back drop (for live tuning readout)
+      };
+      dlPrevHipY = null; dlPrevShoulderY = null; dlRoundSince = 0; dlRoundLast = 0; dlLeanSince = 0;
+      dlActiveStart = NOW;
+    }
+
+    // ---- Per-FRAME back-posture recorder (dev label mode) for threshold tuning ----
+    const DL_FRAME_KEY = 'vf_dl_frames_v3';
+    let dlFrameRows = [];
+    try { dlFrameRows = JSON.parse(localStorage.getItem(DL_FRAME_KEY) || '[]') || []; } catch (e) { dlFrameRows = []; }
+    function dlRecordFrame(f, label, canJudge) {
+      dlFrameRows.push({ f, label, sev: DL_SEV, person: DL_PERSON, t: Date.now(), cj: canJudge ? 1 : 0 });
+      if (dlFrameRows.length % 10 === 0) dlSaveFrames();
+    }
+    function dlSaveFrames() { try { localStorage.setItem(DL_FRAME_KEY, JSON.stringify(dlFrameRows)); } catch (e) {} }
+    function dlSaveRows() { try { localStorage.setItem(DL_ROWS_KEY, JSON.stringify(dlRows)); } catch (e) {} }
+    // 2b.5: never lose the tail of a recording session when the WebView is backgrounded/closed.
+    window.addEventListener('pagehide', () => { dlSaveFrames(); dlSaveRows(); });
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { dlSaveFrames(); dlSaveRows(); } });
+
+    /* =========================================================================
+       EXERCISE DETECTORS
+       Each sets form state every frame (good/bad/unknown) and drives the rep engine.
+       ========================================================================= */
     const EXERCISES = {
 
+      // 1. SQUAT — meaningful depth + complete movement; trunk lean handled separately.
       squat: function (keypoints) {
         const S = pickSide(keypoints, ['hip', 'knee', 'ankle']);
         const hip = kp(keypoints, S + '_hip'), knee = kp(keypoints, S + '_knee');
         const ankle = kp(keypoints, S + '_ankle'), shoulder = kp(keypoints, S + '_shoulder');
-        if (!(hip && knee && ankle)) { debugEl.textContent = 'legs unclear'; return; }
-        const kneeAngle = smooth(ang(hip, knee, ankle));
+        if (!(hip && knee && ankle)) { setForm('unknown'); debugEl.textContent = 'legs unclear'; return; }
+        const kneeAngle = smoothV('squat_knee', ang(hip, knee, ankle));
         lastAngle = kneeAngle;
-        const backAngle = shoulder ? ang(shoulder, hip, knee) : 180;
-        formIsGood = !(stage === 'down' && backAngle <= 45);
-        formMsg = formIsGood ? '' : 'Keep your back upright';
-        debugEl.textContent = 'KNEE:' + Math.round(kneeAngle) + ' BACK:' + Math.round(backAngle) + ' ' + stage + ' reps:' + count + ' side:' + S;
-        countRep(kneeAngle, 130, 150);
+        // Trunk lean = torso deviation from vertical (kept separate from depth).
+        const leanEvaluable = !!shoulder;
+        const leanDeg = shoulder ? verticalDeg(shoulder, hip) : 0;
+        const leanBad = leanEvaluable && leanDeg > 45;
+        setForm(leanEvaluable ? (leanBad ? 'bad' : 'good') : 'unknown', 'Keep your chest up');
+        debugEl.textContent = 'KNEE:' + Math.round(kneeAngle) + ' LEAN:' + Math.round(leanDeg) + '° ' + R.stage + ' good:' + count + ' bad:' + badCount + ' side:' + S;
+        runRep({ metric: kneeAngle, activeWhenBelow: true, enter: 140, exit: 150, target: 100,
+          incompleteMsg: 'Go deeper', formMsg: 'Keep your chest up', formEvaluable: leanEvaluable, formBad: leanBad,
+          debounceMs: 300, onActive: () => sayActive('Stand up') });
       },
 
-      // BOTH ARMS: averages left+right elbow angle when both visible
-      bicepcurl: function (keypoints) {
-        const elbowRes = angBoth(keypoints, 'shoulder', 'elbow', 'wrist');
-        if (!elbowRes) { debugEl.textContent = 'arm(s) unclear — show your arm(s)'; return; }
-        const elbowAngle = smooth(elbowRes.value);
-        lastAngle = elbowAngle;
-
-        const upperArmRes = angBoth(keypoints, 'hip', 'shoulder', 'elbow');
-        const upperArmAngle = upperArmRes ? upperArmRes.value : 0;
-        formIsGood = !(upperArmRes && upperArmAngle > 60);
-        formMsg = formIsGood ? '' : 'Keep your elbow(s) still';
-
-        debugEl.textContent = 'ELBOW:' + Math.round(elbowAngle) + ' UPARM:' + Math.round(upperArmAngle) + ' ' + stage + ' reps:' + count + ' sides:' + elbowRes.sides;
-        countRep(elbowAngle, 80, 140);
-      },
-
-      // BOTH ARMS: averages left+right hip-shoulder-wrist angle when both visible
-      lateralraise: function (keypoints) {
-        const armRes = angBoth(keypoints, 'hip', 'shoulder', 'wrist');
-        if (!armRes) { debugEl.textContent = 'arm(s) unclear — show your side(s)'; return; }
-        const armAngle = smooth(armRes.value);
-        lastAngle = armAngle;
-        formIsGood = !(armAngle > 110);
-        formMsg = formIsGood ? '' : "Don't raise above shoulder";
-        debugEl.textContent = 'ARM:' + Math.round(armAngle) + ' ' + stage + ' reps:' + count + ' sides:' + armRes.sides;
-        if (armAngle > 70 && stage === 'up') stage = 'down';
-        if (armAngle < 30 && stage === 'down') { stage = 'up'; rep(); }
-      },
-
-      shoulderpress: function (keypoints) {
-        const S = pickSide(keypoints, ['shoulder', 'elbow', 'wrist']);
-        const shoulder = kp(keypoints, S + '_shoulder'), elbow = kp(keypoints, S + '_elbow'), wrist = kp(keypoints, S + '_wrist');
-        if (!(shoulder && elbow && wrist)) { debugEl.textContent = 'arm unclear — face camera'; return; }
-        const elbowAngle = smooth(ang(shoulder, elbow, wrist));
-        lastAngle = elbowAngle;
-        formIsGood = true; formMsg = '';
-        debugEl.textContent = 'ELBOW:' + Math.round(elbowAngle) + ' ' + stage + ' reps:' + count + ' side:' + S;
-        if (elbowAngle > 150 && stage === 'up') stage = 'down';
-        if (elbowAngle < 90 && stage === 'down') { stage = 'up'; rep(); }
-      },
-
-      jumpingjack: function (keypoints) {
-        const leftWrist = kp(keypoints, 'left_wrist'), rightWrist = kp(keypoints, 'right_wrist');
-        const nose = kp(keypoints, 'nose');
-        const leftAnkle = kp(keypoints, 'left_ankle'), rightAnkle = kp(keypoints, 'right_ankle');
-        const leftHip = kp(keypoints, 'left_hip'), rightHip = kp(keypoints, 'right_hip');
-        if (!(leftWrist && rightWrist && nose && leftAnkle && rightAnkle && leftHip && rightHip)) {
-          debugEl.textContent = 'show your WHOLE body (head to feet)'; return;
-        }
-        const handsUp = (leftWrist.y < nose.y) && (rightWrist.y < nose.y);
-        const ankleSpread = Math.abs(leftAnkle.x - rightAnkle.x);
-        const hipSpread = Math.abs(leftHip.x - rightHip.x);
-        const legsApart = ankleSpread > hipSpread * 1.5;
-        const jackOpen = handsUp && legsApart;
-        formIsGood = true; formMsg = '';
-        debugEl.textContent = 'hands:' + handsUp + ' legs:' + legsApart + ' ' + stage + ' reps:' + count;
-        if (jackOpen && stage === 'up') stage = 'down';
-        if (!handsUp && !legsApart && stage === 'down') { stage = 'up'; rep(); }
-      },
-
-      highknees: function (keypoints) {
-        const leftHip = kp(keypoints, 'left_hip'), rightHip = kp(keypoints, 'right_hip');
-        const leftKnee = kp(keypoints, 'left_knee'), rightKnee = kp(keypoints, 'right_knee');
-        if (!(leftHip && rightHip && leftKnee && rightKnee)) { debugEl.textContent = 'show your full body'; return; }
-        const hipY = (leftHip.y + rightHip.y) / 2;
-        const kneeMargin = 60 * bodyScale;
-        const leftKneeUp = leftKnee.y < hipY + kneeMargin, rightKneeUp = rightKnee.y < hipY + kneeMargin;
-        const aKneeIsUp = leftKneeUp || rightKneeUp;
-        formIsGood = true; formMsg = '';
-        debugEl.textContent = 'L:' + leftKneeUp + ' R:' + rightKneeUp + ' ' + stage + ' reps:' + count + ' sc:' + bodyScale.toFixed(2);
-        if (aKneeIsUp && stage === 'up') stage = 'down';
-        if (!aKneeIsUp && stage === 'down') { stage = 'up'; rep(); }
-      },
-
-      // BOTH ARMS: averages left+right hip-shoulder-wrist angle when both visible
-      frontraise: function (keypoints) {
-        const armRes = angBoth(keypoints, 'hip', 'shoulder', 'wrist');
-        if (!armRes) { debugEl.textContent = 'face camera — show your arm(s)'; return; }
-        const armAngle = smooth(armRes.value);
-        lastAngle = armAngle;
-
-        const elbowRes = angBoth(keypoints, 'shoulder', 'elbow', 'wrist');
-        const elbowAngle = elbowRes ? elbowRes.value : 180;
-        const armStraight = elbowAngle > 150;
-        formIsGood = !(armAngle > 40 && !armStraight);
-        formMsg = formIsGood ? '' : 'Keep your arm(s) straight';
-        debugEl.textContent = 'ARM:' + Math.round(armAngle) + ' ELBOW:' + Math.round(elbowAngle) + ' ' + stage + ' reps:' + count + ' sides:' + armRes.sides;
-        if (armAngle > 70 && stage === 'up') stage = 'down';
-        if (armAngle < 30 && stage === 'down') { stage = 'up'; rep(); }
-      },
-
-      // BOTH ARMS: averages left+right elbow angle, and left+right body-line, when both visible.
-      // Bilateral by nature — both arms bend together on a real push-up.
-      pushup: function (keypoints) {
-        const elbowRes = angBoth(keypoints, 'shoulder', 'elbow', 'wrist');
-        if (!elbowRes) { debugEl.textContent = 'arm(s) unclear — position the phone so your arms are visible'; return; }
-        const elbowAngle = smooth(elbowRes.value);
-        lastAngle = elbowAngle;
-
-        const bodyRes = angBoth(keypoints, 'shoulder', 'hip', 'knee');
-        const bodyLine = bodyRes ? bodyRes.value : 180;
-        formIsGood = !(bodyRes && bodyLine < 150);
-        formMsg = formIsGood ? '' : 'Keep your body straight — engage your core';
-
-        debugEl.textContent = 'ELBOW:' + Math.round(elbowAngle) + ' BODYLINE:' + Math.round(bodyLine) + ' ' + stage + ' reps:' + count + ' sides:' + elbowRes.sides;
-
-        if (elbowAngle < 100 && stage === 'up') stage = 'down';
-        if (elbowAngle > 160 && stage === 'down') { stage = 'up'; rep(); }
-      },
-
-      sidelegraise: function (keypoints) {
-        const leftAnkle = kp(keypoints, 'left_ankle'), rightAnkle = kp(keypoints, 'right_ankle');
-        if (!(leftAnkle && rightAnkle)) { debugEl.textContent = 'show both feet'; return; }
-        const diff = leftAnkle.y - rightAnkle.y;
-        const liftHeight = Math.abs(diff);
-        const whichLeg = diff < 0 ? 'LEFT' : 'RIGHT';
-        const raised = liftHeight > 60 * bodyScale;
-        const lowered = liftHeight < 30 * bodyScale;
-        formIsGood = true; formMsg = '';
-        debugEl.textContent = 'LIFT:' + Math.round(liftHeight) + ' (' + whichLeg + ') ' + stage + ' reps:' + count + ' sc:' + bodyScale.toFixed(2);
-        if (raised && stage === 'up') { stage = 'down'; statusEl.textContent = 'Lower your leg'; statusEl.style.color = '#5DCAA5'; }
-        if (lowered && stage === 'down') { stage = 'up'; rep(); }
-      },
-
-      kneeraise: function (keypoints) {
-        const leftHip = kp(keypoints, 'left_hip'), rightHip = kp(keypoints, 'right_hip');
-        const leftKnee = kp(keypoints, 'left_knee'), rightKnee = kp(keypoints, 'right_knee');
-        const hips = [leftHip, rightHip].filter(Boolean);
-        if (!hips.length) { debugEl.textContent = 'show your full body'; return; }
-        const hipY = hips.reduce((t, h) => t + h.y, 0) / hips.length;
-        const knees = [leftKnee, rightKnee].filter(Boolean);
-        if (!knees.length) { debugEl.textContent = 'leg not visible'; return; }
-        const workingKnee = knees.reduce((a, b) => (a.y <= b.y ? a : b));
-        const kneeToHip = workingKnee.y - hipY;
-        const raised = kneeToHip < 50 * bodyScale;
-        const down = kneeToHip > 90 * bodyScale;
-        formIsGood = true; formMsg = '';
-        debugEl.textContent = 'KNEE-HIP:' + Math.round(kneeToHip) + ' vis:' + Math.round(workingKnee.score * 100) + '% ' + stage + ' reps:' + count + ' sc:' + bodyScale.toFixed(2);
-        if (raised && stage === 'up') { stage = 'down'; statusEl.textContent = 'Lower'; statusEl.style.color = '#5DCAA5'; }
-        if (down && stage === 'down') { stage = 'up'; rep(); }
-      },
-
-      tricepextension: function (keypoints) {
-        const S = pickSide(keypoints, ['shoulder', 'elbow', 'wrist']);
-        const shoulder = kp(keypoints, S + '_shoulder'), elbow = kp(keypoints, S + '_elbow'), wrist = kp(keypoints, S + '_wrist');
-        if (!(shoulder && elbow && wrist)) { debugEl.textContent = 'show your arm overhead'; return; }
-        const elbowAngle = smooth(ang(shoulder, elbow, wrist));
-        lastAngle = elbowAngle;
-        formIsGood = true; formMsg = '';
-        debugEl.textContent = 'ELBOW:' + Math.round(elbowAngle) + ' ' + stage + ' reps:' + count + ' side:' + S;
-        if (elbowAngle > 150 && stage === 'up') stage = 'down';
-        if (elbowAngle < 90 && stage === 'down') { stage = 'up'; rep(); }
-      },
-
+      // 2. SUMO SQUAT — wider stance; depth target eased, geometry not assumed identical to squat.
       sumosquat: function (keypoints) {
         const S = pickSide(keypoints, ['hip', 'knee', 'ankle']);
         const hip = kp(keypoints, S + '_hip'), knee = kp(keypoints, S + '_knee');
         const ankle = kp(keypoints, S + '_ankle'), shoulder = kp(keypoints, S + '_shoulder');
-        if (!(hip && knee && ankle)) { debugEl.textContent = 'show your legs'; return; }
-        const kneeAngle = smooth(ang(hip, knee, ankle));
+        if (!(hip && knee && ankle)) { setForm('unknown'); debugEl.textContent = 'show your legs'; return; }
+        const kneeAngle = smoothV('sumo_knee', ang(hip, knee, ankle));
         lastAngle = kneeAngle;
-        const backAngle = shoulder ? ang(shoulder, hip, knee) : 180;
-        formIsGood = !(stage === 'down' && backAngle <= 45);
-        formMsg = formIsGood ? '' : 'Keep your back upright';
-        debugEl.textContent = 'KNEE:' + Math.round(kneeAngle) + ' BACK:' + Math.round(backAngle) + ' ' + stage + ' reps:' + count + ' side:' + S;
-        countRep(kneeAngle, 130, 150);
+        const leanEvaluable = !!shoulder;
+        const leanDeg = shoulder ? verticalDeg(shoulder, hip) : 0;
+        const leanBad = leanEvaluable && leanDeg > 45;
+        setForm(leanEvaluable ? (leanBad ? 'bad' : 'good') : 'unknown', 'Keep your chest up');
+        debugEl.textContent = 'KNEE:' + Math.round(kneeAngle) + ' LEAN:' + Math.round(leanDeg) + '° ' + R.stage + ' good:' + count + ' bad:' + badCount + ' side:' + S;
+        runRep({ metric: kneeAngle, activeWhenBelow: true, enter: 150, exit: 160, target: 110,
+          incompleteMsg: 'Go deeper', formMsg: 'Keep your chest up', formEvaluable: leanEvaluable, formBad: leanBad,
+          debounceMs: 300, onActive: () => sayActive('Stand up') });
       },
 
+      // 3. BICEP CURL — extension -> curl -> return; penalize upper-arm swing + partial curls.
+      bicepcurl: function (keypoints) {
+        const elbowRes = angBoth(keypoints, 'shoulder', 'elbow', 'wrist');
+        if (!elbowRes) { setForm('unknown'); debugEl.textContent = 'arm(s) unclear — show your arm(s)'; return; }
+        const elbowAngle = smoothV('curl_elbow', elbowRes.value);
+        lastAngle = elbowAngle;
+        const upperArmRes = angBoth(keypoints, 'hip', 'shoulder', 'elbow');
+        const swingEvaluable = !!upperArmRes;
+        const swing = upperArmRes ? upperArmRes.value : 0;
+        const swingBad = swingEvaluable && swing > 45;
+        setForm(swingEvaluable ? (swingBad ? 'bad' : 'good') : 'unknown', 'Keep your elbows still');
+        debugEl.textContent = 'ELBOW:' + Math.round(elbowAngle) + ' UPARM:' + Math.round(swing) + ' ' + R.stage + ' good:' + count + ' bad:' + badCount + ' ' + elbowRes.sides;
+        runRep({ metric: elbowAngle, activeWhenBelow: true, enter: 110, exit: 150, target: 80,
+          incompleteMsg: 'Curl all the way up', formMsg: 'Keep your elbows still', formEvaluable: swingEvaluable, formBad: swingBad,
+          debounceMs: 300, onActive: () => sayActive('Squeeze') });
+      },
+
+      // 4. LATERAL RAISE — arms down -> raise to shoulder height -> controlled return.
+      lateralraise: function (keypoints) {
+        const armRes = angBoth(keypoints, 'hip', 'shoulder', 'wrist');
+        if (!armRes) { setForm('unknown'); debugEl.textContent = 'arm(s) unclear — show your side(s)'; return; }
+        const armAngle = smoothV('lat_arm', armRes.value);
+        lastAngle = armAngle;
+        const tooHigh = armAngle > 110;
+        setForm(tooHigh ? 'bad' : 'good', "Don't raise above shoulder");
+        debugEl.textContent = 'ARM:' + Math.round(armAngle) + ' ' + R.stage + ' good:' + count + ' bad:' + badCount + ' ' + armRes.sides;
+        runRep({ metric: armAngle, activeWhenBelow: false, enter: 70, exit: 35, target: 70,
+          incompleteMsg: 'Raise to shoulder height', formMsg: "Don't raise above shoulder", formEvaluable: true, formBad: tooHigh,
+          debounceMs: 300, onActive: () => sayActive('Lower slowly') });
+      },
+
+      // 5. FRONT RAISE — elbow stability + controlled elevation.
+      frontraise: function (keypoints) {
+        const armRes = angBoth(keypoints, 'hip', 'shoulder', 'wrist');
+        if (!armRes) { setForm('unknown'); debugEl.textContent = 'face camera — show your arm(s)'; return; }
+        const armAngle = smoothV('front_arm', armRes.value);
+        lastAngle = armAngle;
+        const elbowRes = angBoth(keypoints, 'shoulder', 'elbow', 'wrist');
+        const elbowEvaluable = !!elbowRes;
+        const elbowAngle = elbowRes ? elbowRes.value : 180;
+        const bentElbow = elbowEvaluable && armAngle > 40 && elbowAngle < 150;
+        setForm(elbowEvaluable ? (bentElbow ? 'bad' : 'good') : 'unknown', 'Keep your arms straight');
+        debugEl.textContent = 'ARM:' + Math.round(armAngle) + ' ELBOW:' + Math.round(elbowAngle) + ' ' + R.stage + ' good:' + count + ' bad:' + badCount + ' ' + armRes.sides;
+        runRep({ metric: armAngle, activeWhenBelow: false, enter: 60, exit: 30, target: 60,
+          incompleteMsg: 'Raise to shoulder height', formMsg: 'Keep your arms straight', formEvaluable: elbowEvaluable, formBad: bentElbow,
+          debounceMs: 300, onActive: () => sayActive('Lower slowly') });
+      },
+
+      // 6. SHOULDER PRESS — requires a real lockout (max extension) to count as valid.
+      shoulderpress: function (keypoints) {
+        const S = pickSide(keypoints, ['shoulder', 'elbow', 'wrist']);
+        const shoulder = kp(keypoints, S + '_shoulder'), elbow = kp(keypoints, S + '_elbow'), wrist = kp(keypoints, S + '_wrist');
+        if (!(shoulder && elbow && wrist)) { setForm('unknown'); debugEl.textContent = 'arm unclear — face camera'; return; }
+        const elbowAngle = smoothV('press_elbow', ang(shoulder, elbow, wrist));
+        lastAngle = elbowAngle;
+        // FORM: press both arms evenly — a measurable fault in the usual front-on view.
+        const lw = kp(keypoints, 'left_wrist'), rw = kp(keypoints, 'right_wrist');
+        const ls = kp(keypoints, 'left_shoulder'), rs = kp(keypoints, 'right_shoulder');
+        const symEval = !!(lw && rw && ls && rs);
+        const symBad = symEval && Math.abs(lw.y - rw.y) > Math.max(Math.abs(ls.x - rs.x), 1) * 0.5;
+        setForm(symEval ? (symBad ? 'bad' : 'good') : 'good', 'Press both arms evenly');
+        debugEl.textContent = 'ELBOW:' + Math.round(elbowAngle) + ' even:' + (symEval ? !symBad : '-') + ' ' + R.stage + ' good:' + count + ' bad:' + badCount + ' side:' + S;
+        runRep({ metric: elbowAngle, activeWhenBelow: false, enter: 130, exit: 110, target: 160,
+          incompleteMsg: 'Fully extend your arms', formMsg: 'Press both arms evenly', formEvaluable: symEval, formBad: symBad,
+          minEvalFrames: 4, badRatio: 0.5, debounceMs: 300, onActive: () => sayActive('Press up') });
+      },
+
+      // 7. TRICEP EXTENSION — requires reasonable lockout; penalizes upper-arm swing.
+      tricepextension: function (keypoints) {
+        const S = pickSide(keypoints, ['shoulder', 'elbow', 'wrist']);
+        const shoulder = kp(keypoints, S + '_shoulder'), elbow = kp(keypoints, S + '_elbow'), wrist = kp(keypoints, S + '_wrist');
+        if (!(shoulder && elbow && wrist)) { setForm('unknown'); debugEl.textContent = 'show your arm overhead'; return; }
+        const elbowAngle = smoothV('tri_elbow', ang(shoulder, elbow, wrist));
+        lastAngle = elbowAngle;
+        const hip = kp(keypoints, S + '_hip');
+        const swingEvaluable = !!hip;
+        const swing = hip ? ang(hip, shoulder, elbow) : 0;
+        const swingBad = swingEvaluable && Math.abs(swing - (ema['tri_swingRef'] || swing)) > 35;
+        ema['tri_swingRef'] = (ema['tri_swingRef'] || swing) * 0.95 + swing * 0.05;
+        setForm(swingEvaluable ? (swingBad ? 'bad' : 'good') : 'unknown', 'Keep your upper arm still');
+        debugEl.textContent = 'ELBOW:' + Math.round(elbowAngle) + ' ' + R.stage + ' good:' + count + ' bad:' + badCount + ' side:' + S;
+        runRep({ metric: elbowAngle, activeWhenBelow: false, enter: 130, exit: 110, target: 160,
+          incompleteMsg: 'Extend fully', formMsg: 'Keep your upper arm still', formEvaluable: swingEvaluable, formBad: swingBad,
+          debounceMs: 300, onActive: () => sayActive('Extend') });
+      },
+
+      // 8. PUSH-UP — elbow depth AND body-line (temporally confirmed), with UNKNOWN support.
+      pushup: function (keypoints) {
+        const elbowRes = angBoth(keypoints, 'shoulder', 'elbow', 'wrist');
+        if (!elbowRes) { setForm('unknown'); debugEl.textContent = 'arm(s) unclear — show your arms'; return; }
+        const elbowAngle = smoothV('push_elbow', elbowRes.value);
+        lastAngle = elbowAngle;
+        const bodyRes = angBoth(keypoints, 'shoulder', 'hip', 'knee');
+        const lineEvaluable = !!bodyRes;
+        const bodyLine = bodyRes ? smoothV('push_line', bodyRes.value) : 180;
+        const lineBad = lineEvaluable && bodyLine < 155; // sag or pike
+        setForm(lineEvaluable ? (lineBad ? 'bad' : 'good') : 'unknown', 'Keep your body straight');
+        debugEl.textContent = 'ELBOW:' + Math.round(elbowAngle) + ' LINE:' + Math.round(bodyLine) + ' ' + R.stage + ' good:' + count + ' bad:' + badCount + ' ' + elbowRes.sides;
+        runRep({ metric: elbowAngle, activeWhenBelow: true, enter: 130, exit: 158, target: 100,
+          incompleteMsg: 'Go lower', formMsg: 'Keep your body straight', formEvaluable: lineEvaluable, formBad: lineBad,
+          minEvalFrames: 4, badRatio: 0.45, debounceMs: 350, onActive: () => sayActive('Push up') });
+      },
+
+      // 9. JUMPING JACK — meaningful OPEN -> CLOSED cycle, leg spread normalized to hip width.
+      jumpingjack: function (keypoints) {
+        const lw = kp(keypoints, 'left_wrist'), rw = kp(keypoints, 'right_wrist'), nose = kp(keypoints, 'nose');
+        const la = kp(keypoints, 'left_ankle'), ra = kp(keypoints, 'right_ankle');
+        const lh = kp(keypoints, 'left_hip'), rh = kp(keypoints, 'right_hip');
+        if (!(lw && rw && nose && la && ra && lh && rh)) { setForm('unknown'); debugEl.textContent = 'show your WHOLE body'; return; }
+        const handsUp = (lw.y < nose.y) && (rw.y < nose.y);
+        const hipSpread = Math.max(Math.abs(lh.x - rh.x), 1);
+        const legsApart = Math.abs(la.x - ra.x) > hipSpread * 1.6;
+        const open = handsUp && legsApart, closed = !handsUp && !legsApart;
+        setForm('good');
+        debugEl.textContent = 'hands:' + handsUp + ' legs:' + legsApart + ' ' + R.stage + ' good:' + count + ' bad:' + badCount;
+        if (R.stage === 'active') repFrame(false, false);
+        if (R.stage === 'ready' && open) repStart(() => sayActive('Close'));
+        else if (R.stage === 'active' && closed) repFinish({ debounceMs: 250, minActiveFrames: 2 });
+      },
+
+      // 10. HIGH KNEES — body-relative lift, alternating knees, short debounce.
+      highknees: function (keypoints) {
+        const lh = kp(keypoints, 'left_hip'), rh = kp(keypoints, 'right_hip');
+        const lk = kp(keypoints, 'left_knee'), rk = kp(keypoints, 'right_knee');
+        if (!(lh && rh && (lk || rk))) { setForm('unknown'); debugEl.textContent = 'show your full body'; return; }
+        const hipY = (lh.y + rh.y) / 2;
+        const margin = 55 * bodyScale;
+        const kneeUp = (lk && lk.y < hipY + margin) || (rk && rk.y < hipY + margin);
+        setForm('good');
+        debugEl.textContent = 'kneeUp:' + kneeUp + ' ' + R.stage + ' good:' + count + ' bad:' + badCount + ' sc:' + bodyScale.toFixed(2);
+        if (R.stage === 'active') repFrame(false, false);
+        if (R.stage === 'ready' && kneeUp) repStart();
+        else if (R.stage === 'active' && !kneeUp) repFinish({ debounceMs: 150, minActiveFrames: 1 });
+      },
+
+      // 11. KNEE RAISE — meaningful knee lift relative to body; robust to one-side visibility.
+      kneeraise: function (keypoints) {
+        const lh = kp(keypoints, 'left_hip'), rh = kp(keypoints, 'right_hip');
+        const hips = [lh, rh].filter(Boolean);
+        if (!hips.length) { setForm('unknown'); debugEl.textContent = 'show your full body'; return; }
+        const hipY = hips.reduce((t, h) => t + h.y, 0) / hips.length;
+        const knees = [kp(keypoints, 'left_knee'), kp(keypoints, 'right_knee')].filter(Boolean);
+        if (!knees.length) { setForm('unknown'); debugEl.textContent = 'leg not visible'; return; }
+        const workingKnee = knees.reduce((a, b) => (a.y <= b.y ? a : b));
+        const kneeToHip = workingKnee.y - hipY;
+        const raised = kneeToHip < 50 * bodyScale, down = kneeToHip > 95 * bodyScale;
+        setForm('good');
+        debugEl.textContent = 'KNEE-HIP:' + Math.round(kneeToHip) + ' ' + R.stage + ' good:' + count + ' bad:' + badCount + ' sc:' + bodyScale.toFixed(2);
+        if (R.stage === 'active') repFrame(false, false);
+        if (R.stage === 'ready' && raised) repStart(() => sayActive('Lower'));
+        else if (R.stage === 'active' && down) repFinish({ debounceMs: 300, minActiveFrames: 2 });
+      },
+
+      // 12. SIDE LEG RAISE — estimate lateral abduction (hip->ankle horizontal offset) vs vertical drop,
+      // normalized by leg length so user height isn't assumed.
+      sidelegraise: function (keypoints) {
+        const S = pickSide(keypoints, ['hip', 'knee', 'ankle']);
+        const hip = kp(keypoints, S + '_hip'), knee = kp(keypoints, S + '_knee'), ankle = kp(keypoints, S + '_ankle');
+        if (!(hip && knee && ankle)) { setForm('unknown'); debugEl.textContent = 'show hip, knee & ankle'; return; }
+        const legLen = Math.max(dist3D(hip, knee) + dist3D(knee, ankle), 1);
+        // Lateral offset of the ankle from the hip, normalized by leg length (0 = straight down).
+        const lateral = Math.abs(ankle.x - hip.x) / (USE_BODY_SCALE ? (legLen) : 1);
+        const abduction = smoothV('slr', lateral);
+        const raised = abduction > 0.45, lowered = abduction < 0.2;
+        setForm('good');
+        debugEl.textContent = 'ABDUCT:' + abduction.toFixed(2) + ' ' + R.stage + ' good:' + count + ' bad:' + badCount + ' side:' + S;
+        if (R.stage === 'active') repFrame(false, false, abduction, 'max');
+        if (R.stage === 'ready' && raised) repStart(() => sayActive('Lower your leg'));
+        else if (R.stage === 'active' && lowered) repFinish({ debounceMs: 300, minActiveFrames: 2, target: 0.45, track: 'max', incompleteMsg: 'Raise your leg higher' });
+      },
+
+      // 13. SIDE BEND — torso tilt from shoulder/hip lines, normalized by hip width.
       sidebend: function (keypoints) {
-        const leftShoulder = kp(keypoints, 'left_shoulder'), rightShoulder = kp(keypoints, 'right_shoulder');
-        const leftHip = kp(keypoints, 'left_hip'), rightHip = kp(keypoints, 'right_hip');
-        if (!(leftShoulder && rightShoulder && leftHip && rightHip)) { debugEl.textContent = 'show your upper body'; return; }
-        const shoulderTilt = Math.abs(leftShoulder.y - rightShoulder.y);
-        const hipWidth = Math.abs(leftHip.x - rightHip.x);
-        const tiltRatio = hipWidth > 0 ? shoulderTilt / hipWidth : 0;
-        const smoothedTilt = smooth(tiltRatio * 100);
-        const bent = smoothedTilt > 40, upright = smoothedTilt < 20;
-        formIsGood = true; formMsg = '';
-        debugEl.textContent = 'TILT:' + Math.round(smoothedTilt) + ' need>40 ' + stage + ' reps:' + count;
-        if (bent && stage === 'up') { stage = 'down'; statusEl.textContent = 'Back to center'; statusEl.style.color = '#5DCAA5'; }
-        if (upright && stage === 'down') { stage = 'up'; rep(); }
+        const ls = kp(keypoints, 'left_shoulder'), rs = kp(keypoints, 'right_shoulder');
+        const lh = kp(keypoints, 'left_hip'), rh = kp(keypoints, 'right_hip');
+        if (!(ls && rs && lh && rh)) { setForm('unknown'); debugEl.textContent = 'show your upper body'; return; }
+        const shoulderTilt = Math.abs(ls.y - rs.y);
+        const hipWidth = Math.max(Math.abs(lh.x - rh.x), 1);
+        const tilt = smoothV('bend', (shoulderTilt / hipWidth) * 100);
+        const bent = tilt > 40, upright = tilt < 20;
+        setForm('good');
+        debugEl.textContent = 'TILT:' + Math.round(tilt) + ' (need>40) ' + R.stage + ' good:' + count + ' bad:' + badCount;
+        if (R.stage === 'active') repFrame(false, false, tilt, 'max');
+        if (R.stage === 'ready' && bent) repStart(() => sayActive('Back to center'));
+        else if (R.stage === 'active' && upright) repFinish({ debounceMs: 300, minActiveFrames: 2, target: 40, track: 'max', incompleteMsg: 'Bend further' });
       },
 
-      deadlift: function (keypoints) {
-        const S = pickSide(keypoints, ['shoulder', 'hip', 'knee']);
-        const shoulder = kp(keypoints, S + '_shoulder'), hip = kp(keypoints, S + '_hip');
-        const knee = kp(keypoints, S + '_knee'), ankle = kp(keypoints, S + '_ankle');
-        if (!(shoulder && hip && knee && ankle)) { debugEl.textContent = 'stand at 45° — show full body'; return; }
-        const backAngle = smooth(ang(shoulder, hip, knee));
-        const kneeAngle = smooth(ang(hip, knee, ankle));
-        lastAngle = backAngle;
-        const backRounded = stage === 'down' && shoulder.y > hip.y + 40 * bodyScale;
-        formIsGood = !backRounded;
-        formMsg = backRounded ? 'Keep your back flat' : '';
-        debugEl.textContent = 'BACK:' + Math.round(backAngle) + ' KNEE:' + Math.round(kneeAngle) +
-          ' side:' + S + ' ' + stage + ' reps:' + count;
-        const realHinge = backAngle < 110 && kneeAngle < 150;
-        const realLockout = backAngle > 155 && kneeAngle > 160;
-        if (realHinge && stage === 'up') { stage = 'down'; statusEl.textContent = 'Drive up!'; statusEl.style.color = '#5DCAA5'; }
-        if (realLockout && stage === 'down') { stage = 'up'; rep(); }
-      },
+      // 14. DEADLIFT — rule-based lifecycle + optional experimental ML augmentation.
+      deadlift: deadliftDetector,
     };
 
-    async function detectOnce() {
+    /* -------------------------------------------------------------------------
+       DEADLIFT DETECTOR
+       Signals: hip-hinge (shoulder-hip-knee), knee angle, ear->shoulder->hip
+       neck/head proxy, trunk-vertical lean, hip-vs-chest rise ratio, and an
+       EXPERIMENTAL torso-shrink feature. Feedback priority:
+       visibility -> torso -> hinge -> hips -> knee -> lockout -> back -> ML.
+       ------------------------------------------------------------------------- */
+    function deadliftDetector(keypoints) {
+      const S = pickSide(keypoints, ['shoulder', 'hip', 'knee', 'ankle']);
+      const shoulder = kp(keypoints, S + '_shoulder'), hip = kp(keypoints, S + '_hip');
+      const knee = kp(keypoints, S + '_knee'), ankle = kp(keypoints, S + '_ankle');
+      // VISIBILITY gate -> UNKNOWN (never fake-bad).
+      if (!(shoulder && hip && knee && ankle)) {
+        setFormRaw('unknown', 'Body partly hidden');
+        dlQuality(keypoints, S, false, { haveBase: dlBaseReady() });
+        debugEl.textContent = 'stand side-on — show head to feet';
+        return;
+      }
+
+      // Measure the MediaPipe frame interval (used for the proxy one-missed-frame tolerance).
+      if (dlPrevNow) { const fdt = NOW - dlPrevNow; if (fdt > 0 && fdt < 500) dlFrameDtMs = dlFrameDtMs * 0.7 + fdt * 0.3; }
+      dlPrevNow = NOW;
+
+      const backAngle = smoothV('dl_back', ang(shoulder, hip, knee));   // hip-hinge proxy
+      const kneeAngle = smoothV('dl_knee', ang(hip, knee, ankle));
+      lastAngle = backAngle;
+
+      // Keep baselines fresh while standing upright between reps (also calibrated during the countdown).
+      if (R.stage === 'ready' && backAngle > 165) dlCalibrate(keypoints);
+      // Legacy standing torso baseline for the ML feature vector (unchanged).
+      const torso3D = dist3D(shoulder, hip);
+      if (R.stage === 'ready' && backAngle > 160) dlBaseTorso = dlBaseTorso ? dlBaseTorso * 0.9 + torso3D * 0.1 : torso3D;
+
+      // Head point with fallbacks: near ear -> far ear -> nose.  (fix #3: ear dropout)
+      const head = bestHead(keypoints, S);
+      const headSrc = head ? head.src : null;
+      const earAngle = head ? smoothV('dl_ear', ang(head.pt, shoulder, hip), BACK_EMA_ALPHA) : null;
+
+      // Trunk-shortening signal vs standing baseline (fix #2). ~1.0 on a pure hinge; drops on rounding.
+      const shrink = (dlBaseReady() && dlBase.shoulderHip) ? smoothV('dl_shrink', torso3D / dlBase.shoulderHip, BACK_EMA_ALPHA) : 1;
+
+      const leanDeg = verticalDeg(shoulder, hip);
+      const front = frontFacingRatio(keypoints);
+      const frontFacing = front > FRONT_FACING_MAX;
+
+      // Can we judge the back? Need calibration + a head point + a side-ish camera.
+      const haveBase = dlBaseReady(), haveHead = !!head;
+      const canJudge = haveBase && haveHead && !frontFacing;
+
+      // Signal A: ear/head-shoulder-hip angle DROP vs the user's OWN baseline FOR THE SAME head source
+      // (fix: per-head-source baseline). Only when that source has been calibrated.
+      const earBaseOk = headBaseReady(headSrc);
+      const earDelta = (canJudge && earBaseOk && earAngle != null) ? (dlBase.ear[headSrc].v - earAngle) : 0;
+      const flagEar = canJudge && earBaseOk && earDelta > BACK_ROUND_DEV;
+      // Signal B: trunk shortening.
+      const flagShrink = haveBase && shrink < BACK_SHRINK_MIN;
+      const suspectNow = canJudge ? (flagEar || flagShrink) : false;
+      const bothAgree = flagEar && flagShrink;                 // higher confidence when both agree
+
+      // Primary rounding signal: the ear/shrink proxy.
+      const roundSuspect = suspectNow;
+      const persistMs = BACK_PERSIST_MS;
+
+      // Hip-vs-chest rise ratio (heuristic) — SMOOTHED (fix): the raw per-frame ratio is spiky, so EMA
+      // it before using/aggregating, otherwise one noisy frame inflates hipRiseMax.
+      let hipRiseRaw = 0;
+      if (dlPrevHipY !== null && dlPrevShoulderY !== null) {
+        const dHip = dlPrevHipY - hip.y, dSh = dlPrevShoulderY - shoulder.y;
+        // NOISE FLOOR scaled to the body: ignore sub-noise movement AND never divide by a tiny number.
+        // With a 0.5 px floor, landmark jitter manufactured huge ratios and produced false
+        // "hips rising faster than the chest" flags (caught by the jitter test).
+        const torsoRef = torsoPx > 0 ? torsoPx : Math.hypot(shoulder.x - hip.x, shoulder.y - hip.y);
+        const floor = Math.max(1.5, 0.03 * Math.max(torsoRef, 60));
+        if (dHip > floor) hipRiseRaw = dHip / Math.max(Math.abs(dSh), floor);
+      }
+      dlPrevHipY = hip.y; dlPrevShoulderY = shoulder.y;
+      const hipRiseInstant = smoothV('dl_hiprise', hipRiseRaw, 0.4);
+
+      // Lean-back at lockout — DIRECTION-AGNOSTIC (fix #6): trunk tilts AWAY from the calibrated facing side.
+      const trulyLockedOut = backAngle > DLC.lockoutBack;
+      const leaningBack = dlBase.facingSign ? (Math.sign(shoulder.x - hip.x) === -dlBase.facingSign) : false;
+      const leanBackNow = trulyLockedOut && leaningBack && leanDeg > LEAN_BACK_DEG;
+
+      // Short live persistence (fix #4). A rounding run tolerates ONE missed frame — a flickering
+      // signal from a genuinely rounded back must still accumulate.
+      const gapTolMs = ROUND_GAP_PROXY * dlFrameDtMs;
+      if (roundSuspect) { if (!dlRoundSince) dlRoundSince = NOW; dlRoundLast = NOW; }
+      else if (dlRoundSince && (NOW - dlRoundLast) <= gapTolMs) { /* tolerate one gap */ }
+      else dlRoundSince = 0;
+      const backBadLive = dlRoundSince && (NOW - dlRoundSince >= persistMs);
+      if (leanBackNow) { if (!dlLeanSince) dlLeanSince = NOW; } else dlLeanSince = 0;
+      const leanBadLive = leanBackNow && dlLeanSince && (NOW - dlLeanSince >= LEAN_BACK_MS);
+
+      // ---- RAW per-frame form state (commit layer smooths it into border/message) ----
+      // Priority: poor angle / unseen head / not-yet-calibrated = AMBER with a reason (never fake green/red);
+      // a confirmed rounded back or lean-back = RED; otherwise GREEN with positive evidence.
+      if (!canJudge) {
+        const why = frontFacing ? 'Turn side-on to the camera'
+                  : !haveHead  ? 'Head not visible'
+                  : !haveBase  ? 'Stand tall to calibrate'
+                  : 'Position unclear';
+        setFormRaw('unknown', why);
+      } else if (backBadLive) {
+        setForm('bad', 'Back rounding - keep chest up');
+      } else if (leanBadLive) {
+        setForm('bad', "Don't lean back at lockout");
+      } else if (roundSuspect || leanBackNow) {
+        // Suspicion detected but not yet temporally confirmed: hold AMBER (don't assert GREEN while unsure).
+        setFormRaw('unknown', 'Checking back…');
+      } else {
+        setFormRaw('good', 'Good form - straight back');
+      }
+
+      // ---- aggregate while active (drives the rep-level decision) ----
+      if (R.stage === 'active' && dlAgg) {
+        dlAgg.frames++;
+        dlAgg.backMin = Math.min(dlAgg.backMin, backAngle); dlAgg.backMax = Math.max(dlAgg.backMax, backAngle);
+        dlAgg.kneeMin = Math.min(dlAgg.kneeMin, kneeAngle); dlAgg.kneeMax = Math.max(dlAgg.kneeMax, kneeAngle);
+        if (earAngle !== null) dlAgg.earMin = Math.min(dlAgg.earMin, earAngle);
+        dlAgg.leanMax = Math.max(dlAgg.leanMax, leanDeg);
+        dlAgg.hipRiseMax = Math.max(dlAgg.hipRiseMax, hipRiseInstant);
+        dlAgg.shrinkMin = Math.min(dlAgg.shrinkMin, shrink);
+        dlAgg.frontSum += front; dlAgg.frontN++;
+        if (canJudge) dlAgg.backEvalFrames++;
+        if (canJudge && earBaseOk) dlAgg.earDeltaMax = Math.max(dlAgg.earDeltaMax, earDelta);
+        dlLastPeak = { dEAR: dlAgg.earDeltaMax, shr: dlAgg.shrinkMin };  // live + persists after the rep
+        if (bothAgree) dlAgg.bothAgree = true;
+        // Longest sustained rounding RUN (ms) during the pull — tolerates one missed frame. Any
+        // long-enough run fails the rep.
+        if (roundSuspect) { if (!dlAgg.runStart) dlAgg.runStart = NOW; dlAgg.runLast = NOW; dlAgg.runMax = Math.max(dlAgg.runMax, NOW - dlAgg.runStart); }
+        else if (dlAgg.runStart && (NOW - dlAgg.runLast) <= gapTolMs) { /* tolerate one gap */ }
+        else dlAgg.runStart = 0;
+        if (leanBadLive) dlAgg.leanBackMs = Math.max(dlAgg.leanBackMs, NOW - dlLeanSince);
+        // Recorder (dev): only record judgeable frames, with a canJudge column.
+        if (DL_REC_FRAME && canJudge) {
+          dlRecordFrame([earDelta, shrink, leanDeg, backAngle, kneeAngle, front], DL_LABEL, true);
+        }
+        // Evidence to the rep engine is only confirmed back faults — never forward lean.
+        repFrame(canJudge, backBadLive || leanBadLive, backAngle, 'min');
+      }
+
+      dlQuality(keypoints, S, canJudge, { frontFacing, haveHead, haveBase });
+
+      debugEl.textContent =
+        'BACK:' + Math.round(backAngle) + ' KNEE:' + Math.round(kneeAngle) +
+        ' dEAR:' + (canJudge ? Math.round(earDelta) : '-') + ' SHR:' + shrink.toFixed(2) +
+        ' ' + R.stage + (canJudge ? '' : ' [amber]') +
+        ('\nPEAK dEAR:' + Math.round(dlLastPeak.dEAR) + '/' + BACK_ROUND_DEV + ' SHRmin:' + dlLastPeak.shr.toFixed(2) + '/' + BACK_SHRINK_MIN) +
+        '\ngood:' + count + ' bad:' + badCount + ' side:' + S +
+        ' base:' + (haveBase ? 'ok' : dlBase.n + '/' + CALIB_MIN_FRAMES) + ' mode:' + DLMODE + '/' + DLVAR;
+
+      // State transitions.
+      // ARM the next rep only once the user has returned to a tall stand — this stops random bending /
+      // flailing from counting rep after rep (you must actually stand up straight between reps).
+      if (R.stage === 'ready' && backAngle > STAND_TALL_BACK && kneeAngle > STAND_TALL_KNEE) dlArmed = true;
+      const entering = backAngle < DLC.enterBack;
+      const exiting = backAngle > DLC.exitBack;
+      if (R.stage === 'ready' && entering && dlArmed) { repStart(() => sayActive('Drive up!')); dlResetAgg(); dlArmed = false; }
+      else if (R.stage === 'active' && exiting) { finishDeadliftRep(); }
+    }
+
+    // Front-facing heuristic: shoulder width / torso length. Larger = more front-on.
+    // Used mainly as a SETUP aid (warn when clearly front-facing); 45° is fine.
+    function frontFacingRatio(keypoints) {
+      const ls = kpRaw(keypoints, 'left_shoulder'), rs = kpRaw(keypoints, 'right_shoulder');
+      if (!ls || !rs || !torsoPx) return 0.7;
+      return Math.abs(ls.x - rs.x) / Math.max(torsoPx, 1);
+    }
+
+    // Tracking-quality chip: explains WHY accuracy dropped (never blocks counting).
+    const SETUP_TIP = 'Setup: phone at hip height, 2–3 m away, side-on, head to feet in frame.';
+    function dlQuality(keypoints, S, canJudge, flags) {
+      if (MINIMAL_UI) { dlQualityReasons = []; if (qualityChip) qualityChip.style.display = 'none'; return; } // chip hidden
+      flags = flags || {};
+      const reasons = [];
+      if (flags.frontFacing) reasons.push('Front-facing — turn side-on');
+      if (flags.haveHead === false) reasons.push('Head not visible');
+      if (keypoints && (!jointVisible(keypoints, 'hip') || !jointVisible(keypoints, 'shoulder'))) reasons.push('Body partly hidden');
+      if (keypoints && !jointVisible(keypoints, 'ankle')) reasons.push('Feet cut off');
+      if (torsoPx && torsoPx < TOO_FAR_TORSO_PX) reasons.push('Too far — move closer');
+      if (curFps && curFps < LOW_FPS) reasons.push('Low frame rate');
+      if (NOW - lastSideSwitchMs < 1500) reasons.push('Tracking switched sides');
+      if (flags.haveBase === false) reasons.push('Calibrating — stand tall');
+      dlQualityReasons = reasons;
+      if (!qualityChip) return;
+      if (reasons.length) {
+        qualityChip.style.display = 'block';
+        qualityChip.textContent = '⚠ ' + reasons[0] + (reasons.length > 1 ? ' (+' + (reasons.length - 1) + ')' : '') + '  ⓘ';
+      } else {
+        qualityChip.style.display = 'none';
+        if (setupHint) setupHint.style.display = 'none';
+      }
+    }
+    function hideQuality() { if (qualityChip) qualityChip.style.display = 'none'; if (setupHint) setupHint.style.display = 'none'; }
+    // Tapping the chip reveals/hides the detailed reasons + setup tip.
+    if (qualityChip) qualityChip.addEventListener('click', () => {
+      if (!setupHint) return;
+      const show = setupHint.style.display !== 'block';
+      setupHint.style.display = show ? 'block' : 'none';
+      setupHint.textContent = (dlQualityReasons.length ? ('Tracking: ' + dlQualityReasons.join(' · ') + '.  ') : '') + SETUP_TIP;
+    });
+
+    function finishDeadliftRep() {
+      R.stage = 'ready'; R.readySinceMs = NOW;
+      if (!dlAgg || dlAgg.frames < 3) { dlAgg = null; return; }    // too short / noise
+      // NOT A REAL ATTEMPT: never hinged deep enough -> ignore entirely (no good, no bad, no debounce
+      // consumed). This is what stops random/partial bending from counting as reps.
+      if (dlAgg.backMin > HINGE_ATTEMPT_BACK) { dlAgg = null; return; }
+      // NOT A DEADLIFT: too little forward trunk lean = an upright squat, not a hip-hinge -> ignore.
+      if (dlAgg.leanMax < DEADLIFT_MIN_LEAN) { dlAgg = null; return; }
+      if (NOW - R.lastRepMs < 400) { dlAgg = null; return; }      // deadlift debounce
+      R.lastRepMs = NOW;
+
+      const a = dlAgg;
+      const frontMean = a.frontN ? a.frontSum / a.frontN : 0.7;
+      // Feature vector (fixed order). Defaults keep numbers finite when a signal is absent.
+      const f = [
+        a.backMin === 999 ? 170 : a.backMin,                     // deepest hinge
+        (a.backMax === -999 ? 170 : a.backMax) - (a.backMin === 999 ? 170 : a.backMin), // back range
+        a.kneeMin === 999 ? 170 : a.kneeMin,                     // deepest knee bend
+        (a.kneeMax === -999 ? 170 : a.kneeMax) - (a.kneeMin === 999 ? 170 : a.kneeMin), // knee range
+        a.earMin === 999 ? 150 : a.earMin,                       // neck/head proxy
+        a.leanMax,                                               // max trunk lean
+        a.hipRiseMax,                                            // hip-vs-chest rise ratio
+        a.shrinkMin,                                             // EXPERIMENTAL torso shrink
+        frontMean,                                               // orientation
+      ];
+
+      // UNVERIFIED: too little of the rep was judgeable -> not counted, not bad, amber flash.
+      // (We do NOT record unverified reps — only clean, judgeable reps become training data.)
+      const coverage = a.frames ? a.backEvalFrames / a.frames : 0;
+      if (coverage < MIN_EVAL_COVERAGE && !UNVERIFIED_REP_COUNTS) {
+        dlAgg = null;
+        repUnverified('Could not verify this rep — position unclear');
+        return;
+      }
+
+      // Recording mode (dev): store this rep's features + label for training data.
+      if (DL_RECORD) dlRecord(f, DL_LABEL);
+
+      // ---- RULE-BASED evaluation (priority order) ----
+      const reasons = [];
+      // back: fail the rep if there was ANY sustained rounding run during the pull. Needs calibrated,
+      // judgeable frames (evalCoverage gates it).
+      const backBad = coverage >= MIN_EVAL_COVERAGE && a.runMax >= BACK_RUN_MS;
+      if (backBad) reasons.push('Back rounding - keep chest up');
+      // hinge
+      const hingeReached = a.backMin <= DLC.hingeBackTarget;
+      if (!hingeReached) reasons.push('Hinge at your hips');
+      // hips
+      if (a.hipRiseMax > HIP_RISE_THR + 0.5) reasons.push('Keep hips and chest rising together');
+      // knee (variant-specific)
+      if (DLC.kneeShouldBend && a.kneeMin > DLC.kneeBendMax) reasons.push('Bend your knees');
+      if (!DLC.kneeShouldBend && DLC.kneeTooBent && a.kneeMin < DLC.kneeTooBent) reasons.push('Keep your legs mostly straight');
+      // lockout
+      const lockoutReached = a.backMax >= DLC.lockoutBack && (DLC.lockoutKnee === 0 || a.kneeMax >= DLC.lockoutKnee);
+      if (!lockoutReached) reasons.push('Complete the lockout');
+      // lockout lean-back (direction-agnostic, temporally confirmed; experimental)
+      if (a.leanBackMs >= LEAN_BACK_MS) reasons.push("Don't lean back at lockout");
+
+      let rulesBad = reasons.length > 0;
+
+      // ---- ML augmentation (only when allowed by mode + validation gate) ----
+      let mlBad = false;
+      if (mlAllowedNow()) {
+        const pGood = dlPredictGood(f);
+        if (pGood !== null && pGood < 0.4) { mlBad = true; reasons.push('Adjust your form'); }
+      }
+
+      const bad = rulesBad || mlBad || (STRICT_RED_FAILS_REP && committedState === 'bad');  // optional flag (default off)
+      dlAgg = null;
+      if (bad) badRep(reasons[0] || 'Fix your form');
+      else rep();
+    }
+
+    /* =========================================================================
+       READINESS + READINESS-AWARE COUNTDOWN (replaces the blind 5s timer)
+       ========================================================================= */
+    const REQUIRED = {
+      squat: ['hip', 'knee', 'ankle'], sumosquat: ['hip', 'knee', 'ankle'],
+      bicepcurl: ['shoulder', 'elbow', 'wrist'], tricepextension: ['shoulder', 'elbow', 'wrist'],
+      shoulderpress: ['shoulder', 'elbow', 'wrist'], lateralraise: ['shoulder', 'wrist', 'hip'],
+      frontraise: ['shoulder', 'wrist', 'hip'], pushup: ['shoulder', 'elbow', 'wrist', 'hip', 'knee'],
+      jumpingjack: ['shoulder', 'wrist', 'hip', 'ankle'], highknees: ['hip', 'knee'],
+      kneeraise: ['hip', 'knee'], sidelegraise: ['hip', 'knee', 'ankle'], sidebend: ['shoulder', 'hip'],
+      deadlift: ['shoulder', 'hip', 'knee', 'ankle'],
+    };
+
+    function readiness(keypoints) {
+      if (!keypoints) return { ok: false, msg: 'Step into frame' };
+      const need = REQUIRED[exercise] || ['shoulder', 'hip'];
+      for (const j of need) {
+        if (!jointVisible(keypoints, j)) return { ok: false, msg: 'Show your ' + j + 's clearly' };
+      }
+      if (exercise === 'deadlift') {
+        // Full body: head + ankles visible.
+        const headOk = jointVisible(keypoints, 'ear') || (kpRaw(keypoints, 'nose') && kpRaw(keypoints, 'nose').score >= 0.5);
+        if (!headOk) return { ok: false, msg: 'Show your head too' };
+        if (!jointVisible(keypoints, 'ankle')) return { ok: false, msg: 'Show your whole body (feet included)' };
+        // Orientation: warn only when CLEARLY front-facing; 45° / side is fine.
+        const fr = frontFacingRatio(keypoints);
+        if (fr > 1.1) return { ok: false, msg: 'Turn slightly sideways' };
+      }
+      return { ok: true, msg: 'Hold still…' };
+    }
+
+    let started = false;
+    let readyStableSince = 0;
+    let countdownActive = false, countdownStartMs = 0;
+    const COUNTDOWN_SEC = 5;
+    const countdownOverlay = document.getElementById('countdownOverlay');
+    const cdRing = document.getElementById('countdownRing');
+    const cdNumber = document.getElementById('countdownNumber');
+    const cdLabel = document.getElementById('countdownLabel');
+
+    function cancelCountdown() {
+      if (!countdownActive) return;
+      countdownActive = false;
+      countdownOverlay.style.display = 'none';
+    }
+    function beginCountdown() {
+      countdownActive = true; countdownStartMs = NOW;
+      countdownOverlay.style.display = 'flex';
+      send({ type: 'countdown', seconds: COUNTDOWN_SEC, total: COUNTDOWN_SEC });
+    }
+    function updateCountdown() {
+      const elapsed = (NOW - countdownStartMs) / 1000;
+      const remaining = Math.ceil(COUNTDOWN_SEC - elapsed);
+      if (remaining > 0) {
+        if (cdNumber.textContent !== String(remaining)) {
+          cdNumber.textContent = remaining;
+          cdNumber.classList.remove('pulse'); void cdNumber.offsetWidth; cdNumber.classList.add('pulse');
+          send({ type: 'countdown', seconds: remaining, total: COUNTDOWN_SEC });
+        }
+        cdRing.style.setProperty('--progress', Math.round((Math.max(0, COUNTDOWN_SEC - elapsed) / COUNTDOWN_SEC) * 360) + 'deg');
+        cdLabel.textContent = '';
+      } else {
+        cdRing.style.setProperty('--progress', '0deg');
+        cdNumber.textContent = 'GO!'; cdLabel.textContent = '';
+        send({ type: 'countdown', seconds: 0, total: COUNTDOWN_SEC });
+        countdownActive = false;
+        started = true;
+        R.stage = 'ready'; R.readySinceMs = NOW;
+        setTimeout(() => { countdownOverlay.style.display = 'none'; }, 400);
+        send({ type: 'ar_started' });
+        sayActive('Go!');
+      }
+    }
+
+    function updateStartup(keypoints) {
+      const r = readiness(keypoints);
+      // Personal calibration (fix #5): capture standing baselines during the countdown.
+      if (keypoints && exercise === 'deadlift' && r.ok) dlCalibrate(keypoints);
+      if (!r.ok) {
+        cancelCountdown();
+        readyStableSince = 0;
+        statusEl.textContent = r.msg;
+        statusEl.style.color = '#FFD700';
+        return;
+      }
+      if (!readyStableSince) readyStableSince = NOW;
+      if (NOW - readyStableSince < 700) {   // require brief stability before counting down
+        statusEl.textContent = 'Hold position…';
+        statusEl.style.color = '#5DCAA5';
+        return;
+      }
+      if (!countdownActive) beginCountdown();
+      else updateCountdown();
+    }
+
+    /* =========================================================================
+       DETECTION LOOP
+       ========================================================================= */
+    let lastVideoTime = -1, lastSeenMs = 0;
+
+    function detectOnce() {
       if (video.currentTime === lastVideoTime) return;
       lastVideoTime = video.currentTime;
-      const res = detector.detectForVideo(video, performance.now());
+      NOW = performance.now();
+      const res = detector.detectForVideo(video, NOW);
       frameCount++;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+
       if (res.landmarks && res.landmarks.length > 0) {
         const world = res.worldLandmarks && res.worldLandmarks[0];
         const keypoints = toKeypoints(res.landmarks[0], world, video.videoWidth, video.videoHeight);
         updateBodyScale(keypoints);
-        const detect = EXERCISES[exercise];
-        if (detect) detect(keypoints);
-        else debugEl.textContent = 'Unknown exercise: ' + exercise;
+        lastSeenMs = NOW;
 
-        const drawKeypoints = keypoints.map(smoothKp);
-        const color = SKELETON_COLOR;
-
-        if (formIsGood) {
-          formBorder.style.borderColor = 'rgba(29,158,117,0.55)';
-          formBorder.style.borderWidth = '8px';
+        if (!started) {
+          // Startup/countdown: AMBER with a slow pulse (so the user sees the app is waiting, not frozen).
+          updateStartup(keypoints);
+          resetFormCommit();
+          applyBorder('unknown');
+          formBorder.classList.add('amber-pulse');
         } else {
-          formBorder.style.borderColor = '#E24B4A';
-          formBorder.style.borderWidth = '22px';
+          formBorder.classList.remove('amber-pulse');
+          // Rest/idle reset: after a long pause in READY, clear temporary bad-form state.
+          if (R.stage === 'ready' && R.readySinceMs && NOW - R.readySinceMs > REST_RESET_MS) {
+            R.badFrames = 0; R.evalFrames = 0; R.repValid = true; R.readySinceMs = NOW;
+          }
+          const detect = EXERCISES[exercise];
+          if (detect) detect(keypoints);
+          else { setForm('unknown'); debugEl.textContent = 'Unknown exercise: ' + exercise; }
+          commitForm();                 // raw -> temporally-confirmed committed state (hysteresis + RED latch)
+          sendFormIfChanged();          // message agrees with the committed state
+          applyBorder(committedState);  // GREEN / RED / AMBER (verdict flash may briefly override)
         }
 
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 8;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.shadowColor = color;
-        ctx.shadowBlur = 6;
-
-        CONNECTIONS.forEach(([a, b]) => {
-          const p1 = kp(drawKeypoints, a), p2 = kp(drawKeypoints, b);
-          if (p1 && p2 && p1.score > MIN_SCORE && p2.score > MIN_SCORE) {
-            ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
-          }
-        });
-
-        drawKeypoints.forEach(k => {
-          if (k.score > MIN_SCORE) {
-            ctx.fillStyle = color;
-            ctx.beginPath(); ctx.arc(k.x, k.y, 10, 0, 2 * Math.PI); ctx.fill();
-            ctx.shadowBlur = 0;
-            ctx.fillStyle = '#FFFFFF';
-            ctx.beginPath(); ctx.arc(k.x, k.y, 4, 0, 2 * Math.PI); ctx.fill();
-          }
-        });
-
-        ctx.shadowBlur = 0;
-        sendFormIfChanged();
+        drawSkeleton(keypoints);
       } else {
-        debugEl.textContent = 'no person detected — step into frame';
+        // No person this frame.
+        if (started) {
+          const gap = exercise === 'deadlift' ? POSE_GAP_DL_MS : POSE_GAP_MS;
+          if (lastSeenMs && NOW - lastSeenMs > gap && R.stage === 'active') {
+            // Brief loss: abandon the incomplete rep (no count, no fake bad rep).
+            R.stage = 'ready'; R.extreme = null; R.readySinceMs = NOW; dlAgg = null;
+          }
+          // Pose lost = UNKNOWN (amber), NOT bad form.
+          formBorder.classList.remove('amber-pulse');
+          setFormRaw('unknown', 'Step back into frame');
+          commitForm();
+          sendFormIfChanged();
+          applyBorder(committedState);
+          if (exercise === 'deadlift') dlQuality(null, 'left', false, { haveBase: dlBaseReady() });
+          debugEl.textContent = 'no person — step back into frame';
+        } else {
+          updateStartup(null);
+          resetFormCommit();
+          applyBorder('unknown');
+          formBorder.classList.add('amber-pulse');
+          hideQuality();
+        }
       }
     }
 
+    function drawSkeleton(keypoints) {
+      const drawKeypoints = keypoints.map(smoothKp);
+      const color = SKELETON_COLOR;
+      ctx.strokeStyle = color; ctx.lineWidth = 8; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.shadowColor = color; ctx.shadowBlur = 6;
+      CONNECTIONS.forEach(([a, b]) => {
+        const p1 = kp(drawKeypoints, a), p2 = kp(drawKeypoints, b);
+        if (p1 && p2 && p1.score > MIN_SCORE && p2.score > MIN_SCORE) {
+          ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+        }
+      });
+      drawKeypoints.forEach(k => {
+        if (k.score > MIN_SCORE) {
+          ctx.fillStyle = color; ctx.beginPath(); ctx.arc(k.x, k.y, 10, 0, 2 * Math.PI); ctx.fill();
+          ctx.shadowBlur = 0; ctx.fillStyle = '#FFFFFF';
+          ctx.beginPath(); ctx.arc(k.x, k.y, 4, 0, 2 * Math.PI); ctx.fill();
+        }
+      });
+      ctx.shadowBlur = 0;
+    }
+
     let running = false;
-    async function loop() {
+    function loop() {
       if (detector && video.readyState === 4 && !running) {
         running = true;
-        try { await detectOnce(); }
-        catch (e) { debugEl.textContent = 'detect err: ' + e.message; }
+        try { detectOnce(); } catch (e) { debugEl.textContent = 'detect err: ' + e.message; }
         running = false;
       }
       requestAnimationFrame(loop);
     }
 
-    function startCountdown(seconds, onDone) {
-      const overlay = document.getElementById('countdownOverlay');
-      const ring = document.getElementById('countdownRing');
-      const numberEl = document.getElementById('countdownNumber');
-      const labelEl = document.getElementById('countdownLabel');
+    /* =========================================================================
+       REPLAY / TEST HOOKS (do not interfere with live camera execution)
+       ========================================================================= */
+    // Replay one frame. Optional timestamp `ts` lets a replay drive the clock (for deterministic tests);
+    // it also runs the commit layer so the committed border/message reflect the replay.
+    window.__feed = (kps, ts) => {
+      NOW = (ts != null) ? ts : performance.now();
+      const f = EXERCISES[exercise]; const r = f ? f(kps) : null;
+      commitForm();
+      return r;
+    };
+    window.__count = () => count;
+    window.__bad = () => badCount;
+    window.__form = () => ({ raw: formState, state: committedState, msg: committedMsg }); // committed border/message
+    window.__border = () => ({ verdict: (NOW < verdictUntil ? verdictKind : null), committed: committedState }); // rep-verdict flash state
 
-      let remaining = seconds;
-      overlay.style.display = 'flex';
-      numberEl.textContent = remaining;
-      labelEl.textContent = 'Get into position';
-      ring.style.setProperty('--progress', '360deg');
-      send({ type: 'countdown', seconds: remaining, total: seconds });
+    // Deadlift ML control hooks (for RN / console / evaluation tooling):
+    window.__dlTrain = () => trainDeadlift();
+    window.__dlRows = () => dlRows.length;
+    window.__dlExport = () => JSON.stringify(dlRows);
+    window.__dlClear = () => { dlRows = []; try { localStorage.removeItem(DL_ROWS_KEY); } catch (e) {} return 0; };
+    // Per-FRAME back-posture recorder hooks (label mode: open with ?dlrecframe=1&dllabel=good|bad&person=pN):
+    window.__dlFrameRows = () => dlFrameRows.length;
+    window.__dlFrameExport = () => JSON.stringify(dlFrameRows);
+    window.__dlFrameClear = () => { dlFrameRows = []; try { localStorage.removeItem(DL_FRAME_KEY); } catch (e) {} return 0; };
+    // Flip validated ONLY after a real evaluation supports it (gates ML in hybrid mode).
+    window.__dlValidate = (v) => {
+      if (!dlModel) return null;
+      dlModel.meta.validated = !!v;
+      try { localStorage.setItem(DL_MODEL_KEY, JSON.stringify(dlModel)); } catch (e) {}
+      send({ type: 'dl_model', meta: dlModel.meta });
+      return dlModel.meta;
+    };
+    window.__dlModel = () => (dlModel ? dlModel.meta : null);
 
-      const tick = setInterval(() => {
-        remaining--;
-        if (remaining > 0) {
-          numberEl.textContent = remaining;
-          ring.style.setProperty('--progress', Math.round((remaining / seconds) * 360) + 'deg');
-          numberEl.classList.remove('pulse');
-          void numberEl.offsetWidth;
-          numberEl.classList.add('pulse');
-          send({ type: 'countdown', seconds: remaining, total: seconds });
-        } else {
-          clearInterval(tick);
-          ring.style.setProperty('--progress', '0deg');
-          numberEl.textContent = 'GO!';
-          labelEl.textContent = '';
-          send({ type: 'countdown', seconds: 0, total: seconds });
-          setTimeout(() => {
-            overlay.style.display = 'none';
-            send({ type: 'ar_started' });
-            onDone();
-          }, 500);
-        }
-      }, 1000);
+    /* =========================================================================
+       DEADLIFT SELF-TEST — replays synthetic keypoint sequences and checks the
+       acceptance criteria. Snapshots & restores live state so it won't pollute a
+       real session. Run from the console / RN:  window.__dlSelfTest()
+       ========================================================================= */
+    function __snap() {
+      return {
+        count, badCount, unverifiedCount, R: { ...R }, dlAgg: dlAgg ? JSON.parse(JSON.stringify(dlAgg)) : null, dlBase: JSON.parse(JSON.stringify(dlBase)),
+        ema: { ...ema }, dlRoundSince, dlRoundLast, dlLeanSince, dlArmed, dlActiveStart, dlPrevHipY, dlPrevShoulderY, dlBaseTorso,
+        formState, formMsg, committedState, committedMsg, rawRun, rawRunSince, redUntil,
+        verdictUntil, verdictKind, lastSideSwitchMs, activeSide, started, NOW,
+      };
     }
-
-    function showFatal(err) {
-      const name = err && err.name;
-      const text = (err && err.message) || '';
-      let msg;
-      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-        msg = 'Camera permission is blocked. Allow camera access and reopen.';
-      } else if (name === 'NotFoundError') {
-        msg = 'No camera was found on this device.';
-      } else if (text === 'MODEL_LOAD_TIMEOUT' || /fetch|import|network|load/i.test(text)) {
-        msg = "Couldn't load the AI model. Check your internet connection and reopen.";
-      } else {
-        msg = "Couldn't start the AR camera. Check your internet connection and try again.";
+    function __restore(s) {
+      count = s.count; badCount = s.badCount; unverifiedCount = s.unverifiedCount; Object.assign(R, s.R); dlAgg = s.dlAgg;
+      verdictUntil = s.verdictUntil; verdictKind = s.verdictKind;
+      dlBase = s.dlBase; Object.keys(ema).forEach(k => delete ema[k]); Object.assign(ema, s.ema);
+      dlRoundSince = s.dlRoundSince; dlRoundLast = s.dlRoundLast; dlLeanSince = s.dlLeanSince; dlArmed = s.dlArmed; dlActiveStart = s.dlActiveStart;
+      dlPrevHipY = s.dlPrevHipY; dlPrevShoulderY = s.dlPrevShoulderY;
+      dlBaseTorso = s.dlBaseTorso; formState = s.formState; formMsg = s.formMsg;
+      committedState = s.committedState; committedMsg = s.committedMsg; rawRun = s.rawRun; rawRunSince = s.rawRunSince;
+      redUntil = s.redUntil; lastSideSwitchMs = s.lastSideSwitchMs; activeSide = s.activeSide; started = s.started; NOW = s.NOW;
+    }
+    // Seeded PRNG so the jitter test is deterministic (Math.random made it flaky).
+    let __seed = 12345;
+    function __rnd() { __seed = (__seed * 1103515245 + 12345) & 0x7fffffff; return __seed / 0x7fffffff; }
+    function __resetState() {
+      count = 0; badCount = 0; unverifiedCount = 0; verdictUntil = 0; verdictKind = null;
+      __seed = 12345; dlFrameDtMs = 50; dlPrevNow = 0;
+      Object.assign(R, { stage: 'ready', lastRepMs: 0, readySinceMs: 0, extreme: null, activeFrames: 0, evalFrames: 0, badFrames: 0, repValid: true });
+      dlAgg = null; dlBase = { shoulderHip: 0, facingSign: 0, n: 0, ear: { ear: { v: 0, n: 0 }, ear2: { v: 0, n: 0 }, nose: { v: 0, n: 0 } } };
+      Object.keys(ema).forEach(k => delete ema[k]);
+      dlRoundSince = 0; dlRoundLast = 0; dlLeanSince = 0; dlArmed = false; dlActiveStart = 0; dlPrevHipY = null; dlPrevShoulderY = null; dlBaseTorso = 0;
+      dlLastPeak = { dEAR: 0, shr: 1 };
+      resetFormCommit(); started = true;
+    }
+    // Synthetic side-on deadlift pose. backFromVert: 5=standing, ~80=deep hinge. round: 0..1 rounding.
+    function __dlPose(o) {
+      o = o || {};
+      const backFromVert = o.backFromVert != null ? o.backFromVert : 5;
+      const round = o.round || 0, headVis = o.headVis != null ? o.headVis : 1, face = o.face != null ? o.face : 1;
+      const earVis = o.earVis != null ? o.earVis : headVis;      // 2b.6(g): ear/nose visibility separately
+      const noseVis = o.noseVis != null ? o.noseVis : headVis;
+      const jit = o.jitter || 0;                                  // 2b.6(f): landmark jitter
+      const J = () => (jit ? (__rnd() - 0.5) * 2 * jit : 0);      // SEEDED -> the test is reproducible
+      const kneeBend = o.kneeBend != null ? o.kneeBend : (backFromVert > 40 ? 40 : 5);
+      const hip = { x: 200, y: 300 };
+      const br = backFromVert * Math.PI / 180, Ls = 120 * (1 - 0.12 * round);
+      const shoulder = { x: hip.x + face * Math.sin(br) * Ls, y: hip.y - Math.cos(br) * Ls };
+      const knee = { x: hip.x, y: hip.y + 120 }, kr = kneeBend * Math.PI / 180;
+      const ankle = { x: knee.x - face * Math.sin(kr) * 120, y: knee.y + Math.cos(kr) * 120 };
+      const dir = br + face * round * 35 * Math.PI / 180;        // head rounds forward off the trunk line
+      const ear = { x: shoulder.x + face * Math.sin(dir) * 45, y: shoulder.y - Math.cos(dir) * 45 };
+      const nose = { x: ear.x + face * 15, y: ear.y + 5 };
+      const mk = (n, p, s) => ({ name: n, x: p.x + J(), y: p.y + J(), score: s == null ? 1 : s });
+      return [
+        mk('left_shoulder', shoulder), mk('left_hip', hip), mk('left_knee', knee), mk('left_ankle', ankle),
+        mk('left_ear', ear, earVis), mk('nose', nose, noseVis),
+        mk('right_shoulder', { x: shoulder.x + 6, y: shoulder.y }), mk('right_hip', { x: hip.x + 6, y: hip.y }),
+        mk('right_knee', { x: knee.x + 6, y: knee.y }), mk('right_ankle', { x: ankle.x + 6, y: ankle.y }),
+        mk('right_ear', ear, earVis),
+      ];
+    }
+    window.__dlSelfTest = function () {
+      if (exercise !== 'deadlift') return { error: 'open the page with ?exercise=deadlift to run this test' };
+      const snap = __snap(), dt = 50;
+      const calib = (n) => Array.from({ length: n }, () => ({ kps: __dlPose({ backFromVert: 5 }), phase: 'calib' }));
+      const pull = (n, o) => Array.from({ length: n }, () => ({ kps: __dlPose(Object.assign({ backFromVert: 80, kneeBend: 40 }, o)), phase: 'pull' }));
+      const lock = (n) => Array.from({ length: n }, () => ({ kps: __dlPose({ backFromVert: 5 }), phase: 'lock' }));
+      function run(frames) {
+        __resetState();
+        let clk = 100000, pullStart = null, firstBadMs = null; const pullStates = [];
+        for (const fr of frames) {
+          clk += dt;
+          window.__feed(fr.kps, clk);
+          if (fr.phase === 'pull') {
+            if (pullStart === null) pullStart = clk;
+            pullStates.push(committedState);
+            if (committedState === 'bad' && firstBadMs === null) firstBadMs = clk - pullStart;
+          }
+        }
+        return { count, bad: badCount, unverified: unverifiedCount, pullStates, firstBadMs, verdict: verdictKind };
       }
-      statusEl.textContent = msg;
-      statusEl.style.color = '#E24B4A';
-      debugEl.textContent = text ? 'Error: ' + text : '';
+      const a = run([...calib(10), ...pull(10, { round: 0 }), ...lock(5)]);
+      const b = run([...calib(10), ...pull(14, { round: 1 }), ...lock(5)]);
+      const c = run([...calib(10), ...pull(14, { round: 1, headVis: 0 }), ...lock(5)]);
+      // (d) FLICKER -> BAD: a rounded back whose tracking drops out every 3rd frame. The
+      // one-missed-frame tolerance must bridge the dropouts so the run still accumulates to BAD.
+      const dFrames = [...calib(10)];
+      for (let i = 0; i < 18; i++) dFrames.push({ kps: __dlPose({ backFromVert: 80, kneeBend: 40, round: (i % 3 === 2) ? 0 : 1 }), phase: 'pull' });
+      const d = run([...dFrames, ...lock(5)]);
+      // (d2) same flicker but more strongly rounded (round 1.4) — should also fail the rep.
+      const d2Frames = [...calib(10)];
+      for (let i = 0; i < 18; i++) d2Frames.push({ kps: __dlPose({ backFromVert: 80, kneeBend: 40, round: (i % 3 === 2) ? 0 : 1.4 }), phase: 'pull' });
+      const d2 = run([...d2Frames, ...lock(5)]);
+      // (e) HEAD HIDDEN -> UNVERIFIED: not counted, not bad, amber verdict flash.
+      const e = run([...calib(10), ...pull(16, { round: 0, headVis: 0 }), ...lock(5)]);
+      // (f) JITTER -> GOOD: neutral back with noisy landmarks must still count as a good rep.
+      const f = run([...calib(12), ...pull(12, { round: 0, jitter: 2.5 }), ...lock(6)]);
+      // (g) HEAD-SOURCE SWITCH -> no false BAD: ears vanish mid-pull, nose takes over. The nose has no
+      // calibrated baseline, so the ear signal must simply go unavailable (never a false rounding flag).
+      const g = run([...calib(10), ...pull(6, { round: 0 }), ...pull(10, { round: 0, earVis: 0, noseVis: 1 }), ...lock(5)]);
+
+      __restore(snap);
+      const res = {
+        a_neutral: { pass: a.count === 1 && a.bad === 0 && a.pullStates.includes('good') && !a.pullStates.includes('bad'), ...a },
+        b_rounded: { pass: b.bad === 1 && b.count === 0 && b.firstBadMs != null && b.firstBadMs <= 500, ...b },
+        c_headHidden: { pass: c.pullStates.length > 0 && c.pullStates.every(s => s === 'unknown'), ...c },
+        d_flicker: { pass: d.bad === 1 && d.count === 0, ...d },
+        d2_flickerStrong: { pass: d2.bad === 1 && d2.count === 0, ...d2 },
+        e_unverified: { pass: e.unverified === 1 && e.count === 0 && e.bad === 0 && e.verdict === 'amber', ...e },
+        f_jitter: { pass: f.count === 1 && f.bad === 0 && f.unverified === 0, ...f },
+        g_headSwitch: { pass: g.bad === 0 && g.count === 1, ...g },
+      };
+      res.allPass = ['a_neutral', 'b_rounded', 'c_headHidden', 'd_flicker', 'd2_flickerStrong', 'e_unverified', 'f_jitter', 'g_headSwitch']
+        .every(k => res[k].pass);
+      return res;
+    };
+
+    /* =========================================================================
+       ERROR HANDLING
+       ========================================================================= */
+    function showFatal(err) {
+      const name = err && err.name, text = (err && err.message) || '';
+      let msg;
+      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') msg = 'Camera permission is blocked. Allow camera access and reopen.';
+      else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') msg = 'No camera was found on this device.';
+      else if (name === 'NotReadableError' || name === 'TrackStartError') msg = 'The camera is in use by another app. Close it and reopen.';
+      else if (text === 'MODEL_LOAD_TIMEOUT') msg = 'The AI model took too long to load. Check your connection and reopen.';
+      else if (text === 'MP_IMPORT_FAILED' || /import|fetch|network|load|wasm/i.test(text)) msg = "Couldn't load the AI model library. Check your internet connection and reopen.";
+      else if (text === 'GPU_AND_CPU_FAILED') msg = "Couldn't initialize the pose engine on this device.";
+      else msg = "Couldn't start the AR camera. Please try again.";
+      // In MINIMAL_UI, draw NO floating text on the camera view — React Native shows the error
+      // outside the AR view via the existing 'error' handler (Alert/Modal). Still always send it.
+      if (!MINIMAL_UI) { statusEl.textContent = msg; statusEl.style.color = '#E24B4A'; debugEl.textContent = text ? 'Error: ' + text : ''; }
       send({ type: 'error', message: msg });
     }
 
@@ -607,38 +1712,45 @@
 
     async function init() {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false
-        });
+        let stream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false,
+          });
+        } catch (camErr) { showFatal(camErr); return; }
+
         video.srcObject = stream;
         await new Promise(r => { video.onloadedmetadata = r; });
         canvas.width = video.videoWidth; canvas.height = video.videoHeight;
 
+        let visionMod;
+        try { visionMod = await import(MP + '/vision_bundle.mjs'); }
+        catch (e) { throw new Error('MP_IMPORT_FAILED'); }
+        const { PoseLandmarker, FilesetResolver } = visionMod;
+
         const setup = async () => {
-          const { PoseLandmarker, FilesetResolver } = await import(MP + '/vision_bundle.mjs');
           const fileset = await FilesetResolver.forVisionTasks(MP + '/wasm');
           const make = delegate => PoseLandmarker.createFromOptions(fileset, {
             baseOptions: { modelAssetPath: MODEL_URL, delegate },
-            runningMode: 'VIDEO',
-            numPoses: 1,
-            minPoseDetectionConfidence: 0.5,
-            minPosePresenceConfidence: 0.5,
-            minTrackingConfidence: 0.5,
+            runningMode: 'VIDEO', numPoses: 1,
+            minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.5, minTrackingConfidence: 0.5,
           });
           try { delegateName = 'GPU'; return await make('GPU'); }
-          catch (e) { delegateName = 'CPU'; return await make('CPU'); }
+          catch (gpuErr) {
+            try { delegateName = 'CPU'; return await make('CPU'); }
+            catch (cpuErr) { throw new Error('GPU_AND_CPU_FAILED'); }
+          }
         };
         detector = await withTimeout(setup(), MODEL_LOAD_TIMEOUT_MS, 'MODEL_LOAD_TIMEOUT');
 
         await new Promise(r => { if (video.readyState >= 2) r(); else video.onloadeddata = r; });
-        try { detector.detectForVideo(video, performance.now()); } catch (e) { /* real frames will retry */ }
+        try { detector.detectForVideo(video, performance.now()); } catch (e) { /* warm-up; real frames retry */ }
 
         statusEl.textContent = 'Get into position';
-        startCountdown(5, () => {
-          statusEl.textContent = 'Go!';
-          statusEl.style.color = '#5DCAA5';
-          requestAnimationFrame(loop);
-        });
+        statusEl.style.color = '#fff';
+
+        // Detection runs immediately; rep counting is gated behind readiness + countdown (started flag).
+        requestAnimationFrame(loop);
       } catch (err) {
         showFatal(err);
       }

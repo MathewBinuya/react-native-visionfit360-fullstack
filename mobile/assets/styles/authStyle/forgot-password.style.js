@@ -3,7 +3,7 @@ import COLORS from "../../../constants/colors";
 
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.white, padding: 24 },
+  container: { flex: 1, backgroundColor: COLORS.white, padding: 24, width: "100%", maxWidth: 520, alignSelf: "center" },
   header: { marginBottom: 8 },
   backBtn: { width: 40, height: 40, justifyContent: 'center' },
   titleWrap: { marginBottom: 32 },

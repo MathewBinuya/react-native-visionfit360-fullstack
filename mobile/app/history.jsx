@@ -1,4 +1,5 @@
-import { View, Text, TouchableOpacity, ScrollView, Alert, Modal } from 'react-native'
+import { View, Text, TouchableOpacity, ScrollView, Modal } from 'react-native'
+import { showAlert } from '../components/AppAlert'
 import { useState, useEffect } from 'react'
 import { router } from 'expo-router'
 import { Ionicons } from "@expo/vector-icons"
@@ -36,7 +37,7 @@ export default function History() {
 
   const confirmDelete = (id, title) => {
     setMenuWorkout(null);  
-    Alert.alert(
+    showAlert(
       "Delete workout",
       `Remove "${title || "this workout"}" from your history?`,
       [
@@ -51,7 +52,7 @@ export default function History() {
       await api.delete(`/workouts/${id}`);
       setWorkouts((prev) => prev.filter((w) => w._id !== id));
     } catch (error) {
-      Alert.alert("Error", error.response?.data?.message || "Failed to delete");
+      showAlert("Error", error.response?.data?.message || "Failed to delete");
     }
   };
 
@@ -74,13 +75,13 @@ export default function History() {
         completed: false,
         notes: "",
       });
-      Alert.alert(
+      showAlert(
         "Added to Workout! 💪",
         `"${w.title || "Workout"}" is ready in your tracker.`,
         [{ text: "OK" }]
       );
     } catch (error) {
-      Alert.alert("Error", error.response?.data?.message || "Failed to duplicate workout");
+      showAlert("Error", error.response?.data?.message || "Failed to duplicate workout");
     }
   };
 
@@ -191,7 +192,7 @@ export default function History() {
                   Do this again
                 </Text>
                 <Text style={{ fontSize: 12, color: COLORS.gray, marginTop: 1 }}>
-                  Copy to today's workout tracker
+                  {"Copy to today's workout tracker"}
                 </Text>
               </View>
             </TouchableOpacity>

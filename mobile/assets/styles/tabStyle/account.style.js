@@ -29,6 +29,48 @@ const styles = StyleSheet.create({
   },
   row: { flexDirection: "row", gap: 12 },
 
+  // input with a trailing unit suffix (cm / kg / ft / in)
+  inputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: COLORS.inputBackground,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingHorizontal: 12,
+  },
+  unitSuffix: { fontSize: 13, color: COLORS.placeholderText, marginLeft: 6, fontFamily: "GeneralSans-Variable" },
+
+  // unit toggle (sits on the label row)
+  labelRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  unitToggle: {
+    flexDirection: "row",
+    backgroundColor: COLORS.inputBackground,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    overflow: "hidden",
+  },
+  unitPill: { paddingHorizontal: 12, paddingVertical: 5 },
+  unitPillActive: { backgroundColor: COLORS.button },
+  unitText: { fontSize: 12, color: COLORS.black, fontFamily: "GeneralSans-Variable" },
+  unitTextActive: { color: COLORS.white, fontFamily: "GeneralSans-Variable" },
+
+  // tappable row (e.g. Send feedback)
+  rowBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 20,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    backgroundColor: COLORS.inputBackground,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  rowBtnText: { color: COLORS.black, fontSize: 15, fontWeight: "600", fontFamily: "GeneralSans-Variable" },
+
   genderRow: { flexDirection: "row", gap: 8 },
   genderPill: {
     flex: 1,

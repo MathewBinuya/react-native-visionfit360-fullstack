@@ -2,9 +2,11 @@ import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import COLORS from "../../constants/colors";
+import { useHeartbeat } from "../../lib/heartbeat";
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
+  useHeartbeat(); // keep presence fresh while the user is in the app
 
   return (
     <Tabs

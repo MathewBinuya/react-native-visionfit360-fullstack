@@ -1,4 +1,5 @@
-import { View, Text, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator, Alert, BackHandler, Share } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator, BackHandler, Share } from 'react-native'
+import { showAlert } from '../../components/AppAlert'
 import { useState, useEffect, useRef } from 'react'
 import { Ionicons } from "@expo/vector-icons"
 import AsyncStorage from '@react-native-async-storage/async-storage'
@@ -129,7 +130,7 @@ export default function AICoach() {
     const index = menuMessage?.index;
     setMenuMessage(null);
     if (index === undefined) return;
-    Alert.alert(
+    showAlert(
       "Delete message",
       "Remove this message from the conversation?",
       [
@@ -154,9 +155,9 @@ export default function AICoach() {
         exercises,
       });
       setMenuMessage(null);
-      Alert.alert("Added!", "This workout was added to your tracker.");
+      showAlert("Added!", "This workout was added to your tracker.");
     } catch (error) {
-      Alert.alert("Error", error.response?.data?.message || "Failed to add to tracker");
+      showAlert("Error", error.response?.data?.message || "Failed to add to tracker");
     } finally {
       setAddingToTracker(false);
     }
@@ -294,7 +295,7 @@ export default function AICoach() {
               <View style={{ marginBottom: 14, flexDirection: 'row', gap: 10 }}>
                 <Ionicons name="chatbubble-ellipses-outline" size={20} color={COLORS.button} style={{ marginTop: 2 }} />
                 <Text style={{ flex: 1, fontSize: 14, color: COLORS.gray, lineHeight: 20 }}>
-                  Your coach gives you a workout automatically, and you can ask it anything — try "give me a leg day".
+                  {"Your coach gives you a workout automatically, and you can ask it anything — try \"give me a leg day\"."}
                 </Text>
               </View>
 

@@ -1,16 +1,5 @@
-import { View, 
-         Text, 
-         StyleSheet,
-         Image,
-         Dimensions,
-         TextInput,
-         KeyboardAvoidingView,
-         ActivityIndicator,
-         TouchableOpacity,
-         Platform,
-         Alert
-        } 
-        from 'react-native'
+import { View, Text, StyleSheet, Image, Dimensions, TextInput, KeyboardAvoidingView, ActivityIndicator, TouchableOpacity, Platform, ScrollView } from 'react-native'
+import { showAlert } from '../../components/AppAlert'
 import { Link } from 'expo-router'        
 import { router } from "expo-router";
 import React, { useState } from 'react'
@@ -32,7 +21,7 @@ const {isLoading, login, isCheckingAuth} = useAuthStore();
 const handleLogin = async () => {
   const result = await login(email,password);
   if(!result.success) {
-    Alert.alert("Error", result.error);
+    showAlert("Error", result.error);
     return;
   }
   
@@ -52,7 +41,7 @@ const handleLogin = async () => {
       style={{ flex: 1 }}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >  
-    <View style={styles.container}>
+    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             {/* Login Image */}
        <View style={styles.topIllustration}>
           <Image
@@ -135,7 +124,7 @@ const handleLogin = async () => {
             
                 {/* Footer */}
             <View style={styles.footer}> 
-              <Text style={styles.footerText}>Don't have an account?</Text>
+              <Text style={styles.footerText}>{"Don't have an account?"}</Text>
               <Link href="/signup" asChild>
                   <TouchableOpacity>
                     <Text style={styles.link}>Sign up</Text>
@@ -143,7 +132,7 @@ const handleLogin = async () => {
               </Link>
             </View>
        </View>
-    </View>
+    </ScrollView>
     </KeyboardAvoidingView>
   );
 }

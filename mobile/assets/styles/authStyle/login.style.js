@@ -12,8 +12,9 @@ const styles = StyleSheet.create({
   },
   scrollViewStyle: { alignItems: "center", backgroundColor: COLORS.background, },
   topIllustration: { alignItems: "center", width: "100%", marginBottom: 8, },
-  illustrationImage: { width: width * 0.6, height: height * 0.28,},
+  illustrationImage: { width: width * 0.6, height: height * 0.28, maxWidth: 320, maxHeight: 240 },
   card: {
+    width: "100%", maxWidth: 480, alignSelf: "center",
     backgroundColor: COLORS.cards,
     borderRadius: 20,
     padding: 28,

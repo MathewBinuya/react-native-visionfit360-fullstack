@@ -1,7 +1,5 @@
-import { View, Text, TextInput, TouchableOpacity,
-  ScrollView, Alert, ActivityIndicator,
-  KeyboardAvoidingView, Platform, BackHandler
-} from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform, BackHandler } from 'react-native'
+import { showAlert } from '../components/AppAlert'
 import { useState, useEffect } from 'react'
 import { router } from 'expo-router'
 import { Ionicons } from "@expo/vector-icons"
@@ -111,7 +109,7 @@ export default function Workout() {
 
   const addSetToNewExercise = (exIdx) => {
     if (newExercises[exIdx].sets.length >= MAX_SETS_PER_EXERCISE) {
-      Alert.alert("Limit reached", `You can add up to ${MAX_SETS_PER_EXERCISE} sets per exercise.`);
+      showAlert("Limit reached", `You can add up to ${MAX_SETS_PER_EXERCISE} sets per exercise.`);
       return;
     }
     const updated = [...newExercises];
@@ -166,7 +164,7 @@ export default function Workout() {
 
   const addSetToExercise = (exIdx) => {
     if (editExercises[exIdx].sets.length >= MAX_SETS_PER_EXERCISE) {
-      Alert.alert("Limit reached", `You can add up to ${MAX_SETS_PER_EXERCISE} sets per exercise.`);
+      showAlert("Limit reached", `You can add up to ${MAX_SETS_PER_EXERCISE} sets per exercise.`);
       return;
     }
     const updated = [...editExercises];
@@ -193,11 +191,11 @@ export default function Workout() {
 
   //  SAVE EDIT 
   const saveEdit = async () => {
-    if (!editTitle.trim()) { Alert.alert("Missing", "Please enter a workout title"); return; }
+    if (!editTitle.trim()) { showAlert("Missing", "Please enter a workout title"); return; }
 
     const validationError = validateExercises(editExercises);
     if (validationError) {
-      Alert.alert("Invalid input", validationError);
+      showAlert("Invalid input", validationError);
       return;
     }
 
@@ -220,7 +218,7 @@ export default function Workout() {
       setShowEdit(false);
       setEditWorkout(null);
     } catch (error) {
-      Alert.alert("Error", error.response?.data?.message || "Failed to save changes");
+      showAlert("Error", error.response?.data?.message || "Failed to save changes");
     } finally {
       setEditSaving(false);
     }
@@ -232,14 +230,14 @@ export default function Workout() {
       await api.patch(`/workouts/${id}/complete`);
       setWorkouts(prev => prev.filter(w => w._id !== id));
     } catch (error) {
-      Alert.alert("Error", error.response?.data?.message || "Failed to complete workout");
+      showAlert("Error", error.response?.data?.message || "Failed to complete workout");
     }
   };
 
   //  DELETE WORKOUT 
   const confirmDelete = (id, title) => {
     setMenuWorkout(null);
-    Alert.alert(
+    showAlert(
       "Delete workout",
       `Remove "${title || "this workout"}"?`,
       [
@@ -254,23 +252,23 @@ export default function Workout() {
       await api.delete(`/workouts/${id}`);
       setWorkouts(prev => prev.filter(w => w._id !== id));
     } catch (error) {
-      Alert.alert("Error", error.response?.data?.message || "Failed to delete");
+      showAlert("Error", error.response?.data?.message || "Failed to delete");
     }
   };
 
   //  SAVE NEW WORKOUT 
   const saveWorkout = async () => {
-    if (!newTitle.trim()) { Alert.alert("Missing", "Please enter a workout title"); return; }
+    if (!newTitle.trim()) { showAlert("Missing", "Please enter a workout title"); return; }
 
     const validExercises = newExercises.filter(ex => ex.name.trim());
     if (validExercises.length === 0) {
-      Alert.alert("Missing", "Please add at least one exercise");
+      showAlert("Missing", "Please add at least one exercise");
       return;
     }
 
     const validationError = validateExercises(validExercises);
     if (validationError) {
-      Alert.alert("Invalid input", validationError);
+      showAlert("Invalid input", validationError);
       return;
     }
 
@@ -293,7 +291,7 @@ export default function Workout() {
       setWorkouts(prev => [res.data, ...prev]);
       setShowAdd(false);
     } catch (error) {
-      Alert.alert("Error", error.response?.data?.message || "Failed to save");
+      showAlert("Error", error.response?.data?.message || "Failed to save");
     } finally {
       setSaving(false);
     }

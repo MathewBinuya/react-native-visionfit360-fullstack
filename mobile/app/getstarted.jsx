@@ -1,9 +1,13 @@
-import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native'
+import { View, Text, Image, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native'
 import { router } from 'expo-router'
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import COLORS from "../constants/colors"
 
 export default function GetStarted() {
+  const { height } = useWindowDimensions();
+  // responsive hero: shrink on short phones so the buttons always stay on screen
+  const heroHeight = Math.min(240, Math.round(height * 0.3));
+
   // mark that the user has seen this, then route
   const go = async (path) => {
     await AsyncStorage.setItem("hasSeenGetStarted", "true");
@@ -12,11 +16,12 @@ export default function GetStarted() {
 
   return (
     <View style={styles.container}>
+      <View style={styles.content}>
       <Text style={styles.title}>Start your{"\n"}journey</Text>
 
       <Image
         source={require('../assets/images/new-hero-image.png')}   // your image here
-        style={styles.image}
+        style={[styles.image, { height: heroHeight }]}
         resizeMode="contain"
       />
 
@@ -29,11 +34,13 @@ export default function GetStarted() {
           <Text style={styles.secondaryText}>I already have an account</Text>
         </TouchableOpacity>
       </View>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  content: { width: "100%", maxWidth: 480, alignSelf: "center" },
   container: {
     flex: 1,
     backgroundColor: COLORS.background,

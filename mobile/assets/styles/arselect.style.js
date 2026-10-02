@@ -22,19 +22,19 @@ const styles = StyleSheet.create({
   grid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    justifyContent: "space-between",
+    justifyContent: "flex-start",
     paddingHorizontal: 16,
     gap: 12,
+    paddingBottom: 24,
   },
   card: {
-    width: "47%",
     backgroundColor: COLORS.cards,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: COLORS.border,
     paddingVertical: 22,
     alignItems: "center",
-    marginBottom: 12,
+    paddingHorizontal: 8,
   },
   cardLabel: {
     fontSize: 14,
@@ -49,6 +49,8 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontFamily: "GeneralSans-Variable",
   },
+  howRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 8 },
+  howText: { fontSize: 11, fontWeight: "600", color: COLORS.button, fontFamily: "GeneralSans-Variable" },
   soon: { fontSize: 10, color: COLORS.placeholderText, marginTop: 2, fontFamily: "GeneralSans-Variable" },
 });
 

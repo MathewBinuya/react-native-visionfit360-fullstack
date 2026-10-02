@@ -156,7 +156,7 @@ export default function Home() {
           <Ionicons name="barbell" size={24} color={COLORS.white} />
           <View style={{ marginLeft: 12 }}>
             <Text style={styles.trackerTitle}>Workout Tracker</Text>
-            <Text style={styles.trackerSub}>Log today's session</Text>
+            <Text style={styles.trackerSub}>{"Log today's session"}</Text>
           </View>
         </TouchableOpacity>
 

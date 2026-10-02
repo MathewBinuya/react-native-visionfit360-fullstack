@@ -1,17 +1,5 @@
-import { View, 
-         Text,
-         StyleSheet,
-         Image,
-         TextInput,
-         TouchableOpacity,
-         KeyboardAvoidingView,
-         Platform,
-         Alert,
-         ActivityIndicator,
-         BackHandler,
-         ScrollView
-        } 
-         from 'react-native'
+import { View, Text, StyleSheet, Image, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ActivityIndicator, BackHandler, ScrollView } from 'react-native'
+import { showAlert } from '../../components/AppAlert'
 import { useState, useEffect } from 'react'
 import { Ionicons } from "@expo/vector-icons"
 import { useRouter } from 'expo-router';
@@ -89,20 +77,20 @@ useEffect(() => {
 const handleSignUp = async () => {
   // client-side guard (backend still enforces it too)
   if (!isAllowedEmail(email)) {
-    Alert.alert("Invalid Email", EMAIL_DOMAIN_ERROR);
+    showAlert("Invalid Email", EMAIL_DOMAIN_ERROR);
     return;
   }
   if (!isValidPassword) {
-    Alert.alert("Weak Password", "Password must be at least 8 characters and include a letter and a number.");
+    showAlert("Weak Password", "Password must be at least 8 characters and include a letter and a number.");
     return;
   }
   if (!agreedToTerms) {
-    Alert.alert("Terms required", "Please agree to the Terms & Conditions to continue.");
+    showAlert("Terms required", "Please agree to the Terms & Conditions to continue.");
     return;
   }
   const result = await register(username, email, password);
   if(!result.success) {
-      Alert.alert("Error", result.error);
+      showAlert("Error", result.error);
       return;
   } 
   router.replace({ pathname: "./verify-email", params: { email } });
@@ -113,7 +101,7 @@ const handleSignUp = async () => {
       style={{ flex: 1 }}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
      >
-    <View style={styles.container}>
+    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
       <View style={styles.card}>
         <Text style={styles.title}>Sign up</Text>
         <View style={styles.formContainer}>
@@ -254,7 +242,7 @@ const handleSignUp = async () => {
            </TouchableOpacity>
         </View>
       </View>
-    </View>
+    </ScrollView>
 
     {/*  TERMS & CONDITIONS MODAL  */}
     {showTerms && (

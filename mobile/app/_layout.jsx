@@ -1,6 +1,7 @@
 import { Stack } from "expo-router";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import SafeScreen from "../components/SafeScreen"
+import { AlertProvider } from "../components/AppAlert"
 import { StatusBar } from "expo-status-bar";
 import {useFonts} from "expo-font";
 
@@ -12,7 +13,8 @@ export default function RootLayout() {
   if(!fontsLoaded) return null;
 
   return (
-    <SafeAreaProvider>  
+    <SafeAreaProvider>
+      <AlertProvider>
       <SafeScreen>
         <Stack screenOptions={{headerShown: false}} >
           <Stack.Screen name="index"/>
@@ -25,10 +27,12 @@ export default function RootLayout() {
           <Stack.Screen name="ar-select" />
           <Stack.Screen name="posetracker" />
           <Stack.Screen name="repvision-guide" />
+          <Stack.Screen name="feedback" />
 
           
         </Stack>
       </SafeScreen>
+      </AlertProvider>
       <StatusBar style="dark"/>
     </SafeAreaProvider>
   );

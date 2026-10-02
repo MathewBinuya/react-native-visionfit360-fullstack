@@ -1,4 +1,5 @@
-import { View, Text, TouchableOpacity, Switch, Alert } from 'react-native'
+import { View, Text, TouchableOpacity, Switch } from 'react-native'
+import { showAlert } from '../components/AppAlert'
 import { useState, useEffect } from 'react'
 import { router } from 'expo-router'
 import { Ionicons } from "@expo/vector-icons"
@@ -42,7 +43,7 @@ export default function NotificationsScreen() {
     if (value) {
       const granted = await requestPermission();
       if (!granted) {
-        Alert.alert("Permission needed", "Enable notifications in your phone settings to get reminders.");
+        showAlert("Permission needed", "Enable notifications in your phone settings to get reminders.");
         return;
       }
       setEnabled(true);

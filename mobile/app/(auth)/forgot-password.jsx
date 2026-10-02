@@ -1,4 +1,5 @@
-import { View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, KeyboardAvoidingView, ScrollView, Platform } from 'react-native'
+import { showAlert } from '../../components/AppAlert'
 import { useState } from 'react'
 import { router } from 'expo-router'
 import { Ionicons } from "@expo/vector-icons"
@@ -17,8 +18,8 @@ export default function ForgotPassword() {
   const [loading, setLoading] = useState(false);
  
   const requestCode = async () => {
-    if (!email.trim()) return Alert.alert("Missing", "Please enter your email address");
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return Alert.alert("Invalid", "Please enter a valid email address");
+    if (!email.trim()) return showAlert("Missing", "Please enter your email address");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return showAlert("Invalid", "Please enter a valid email address");
  
     setLoading(true);
     try {
@@ -31,7 +32,7 @@ export default function ForgotPassword() {
      
       if (!res.ok) throw new Error(data.message || "Something went wrong");
         // replace the if (data.resetCode) block with this:
-      Alert.alert(
+      showAlert(
         "Code Sent!",
         "A reset code has been sent to your email. Check your inbox.",
         [{ text: "Got it", onPress: () => setStep(2) }]
@@ -39,19 +40,19 @@ export default function ForgotPassword() {
         
   
     } catch (error) {
-      Alert.alert("Error", error.message || "Failed to send reset code");
+      showAlert("Error", error.message || "Failed to send reset code");
     } finally {
       setLoading(false);
     }
   };
  
   const resetPassword = async () => {
-    if (!resetCode.trim()) return Alert.alert("Missing", "Please enter your reset code");
-    if (!newPassword) return Alert.alert("Missing", "Please enter a new password");
-    if (newPassword !== confirmPassword) return Alert.alert("Mismatch", "Passwords do not match");
-    if (newPassword.length < 8) return Alert.alert("Too short", "Password must be at least 8 characters");
-    if (!/[a-zA-Z]/.test(newPassword)) return Alert.alert("Weak password", "Password must include at least one letter");
-    if (!/[0-9]/.test(newPassword)) return Alert.alert("Weak password", "Password must include at least one number");
+    if (!resetCode.trim()) return showAlert("Missing", "Please enter your reset code");
+    if (!newPassword) return showAlert("Missing", "Please enter a new password");
+    if (newPassword !== confirmPassword) return showAlert("Mismatch", "Passwords do not match");
+    if (newPassword.length < 8) return showAlert("Too short", "Password must be at least 8 characters");
+    if (!/[a-zA-Z]/.test(newPassword)) return showAlert("Weak password", "Password must include at least one letter");
+    if (!/[0-9]/.test(newPassword)) return showAlert("Weak password", "Password must include at least one number");
     setLoading(true);
     try {
       const res = await fetch(`${API_URL}/auth/reset-password`, {
@@ -61,15 +62,17 @@ export default function ForgotPassword() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Something went wrong");
-      Alert.alert("Password Reset", "Your password has been updated. Please log in.", [{ text: "Log in", onPress: () => router.replace("/(auth)") }]);
+      showAlert("Password Reset", "Your password has been updated. Please log in.", [{ text: "Log in", onPress: () => router.replace("/(auth)") }]);
     } catch (error) {
-      Alert.alert("Error", error.message || "Failed to reset password");
+      showAlert("Error", error.message || "Failed to reset password");
     } finally {
       setLoading(false);
     }
   };
  
   return (
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
+    <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => step === 2 ? setStep(1) : router.back()} style={styles.backBtn}>
@@ -135,5 +138,7 @@ export default function ForgotPassword() {
         </View>
       )}
     </View>
+    </ScrollView>
+    </KeyboardAvoidingView>
   );
 }

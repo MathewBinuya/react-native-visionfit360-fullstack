@@ -1,14 +1,5 @@
-import { View, 
-         Text,
-         TextInput,
-         TouchableOpacity,
-         KeyboardAvoidingView,
-         Platform,
-         Alert,
-         ActivityIndicator,
-         BackHandler
-        } 
-         from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ActivityIndicator, BackHandler, ScrollView } from 'react-native'
+import { showAlert } from '../../components/AppAlert'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
@@ -81,7 +72,7 @@ export default function VerifyEmail() {
   const handleVerify = async () => {
     const fullCode = code.join("");
     if (fullCode.length < 6) {
-      Alert.alert("Incomplete code", "Please enter all 6 digits.");
+      showAlert("Incomplete code", "Please enter all 6 digits.");
       return;
     }
 
@@ -90,7 +81,7 @@ export default function VerifyEmail() {
     setIsVerifying(false);
 
     if (!result.success) {
-      Alert.alert("Verification failed", result.error);
+      showAlert("Verification failed", result.error);
       return;
     }
 
@@ -103,7 +94,7 @@ export default function VerifyEmail() {
     setIsResending(false);
 
     if (!result.success) {
-      Alert.alert("Error", result.error);
+      showAlert("Error", result.error);
       return;
     }
 
@@ -119,7 +110,7 @@ export default function VerifyEmail() {
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
-        <View style={styles.container}>
+        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <View style={styles.card}>
             <View style={styles.header}>
               <Text style={styles.title}>Verify your email</Text>
@@ -165,12 +156,12 @@ export default function VerifyEmail() {
                 <ActivityIndicator color={COLORS.button} size="small" />
               ) : (
                 <TouchableOpacity onPress={handleResend}>
-                  <Text style={styles.resendLink}>Didn't get it? Resend code</Text>
+                  <Text style={styles.resendLink}>{"Didn't get it? Resend code"}</Text>
                 </TouchableOpacity>
               )}
             </View>
           </View>
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </>
   )
