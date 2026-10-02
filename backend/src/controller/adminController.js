@@ -21,6 +21,23 @@ const SAFE_USER_FIELDS =
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+// Shared pipeline: distinct users + session counts per exercise (from workout records).
+// Reused by the dashboard summary and the dedicated "Users per Exercise" page.
+const exerciseUsagePipeline = (limit = 50) => [
+  { $unwind: "$exercises" },
+  { $match: { "exercises.name": { $nin: [null, ""] } } },
+  {
+    $group: {
+      _id: { $toLower: "$exercises.name" },
+      users: { $addToSet: "$user" },
+      sessions: { $sum: 1 },
+    },
+  },
+  { $project: { _id: 0, exercise: "$_id", userCount: { $size: "$users" }, sessions: 1 } },
+  { $sort: { userCount: -1, sessions: -1 } },
+  { $limit: limit },
+];
+
 //  AUTH 
 export const adminLogin = async (req, res) => {
   try {
@@ -253,20 +270,7 @@ export const getDashboard = async (req, res) => {
       ]),
 
       // --- users per exercise + sessions per exercise ---
-      Workout.aggregate([
-        { $unwind: "$exercises" },
-        { $match: { "exercises.name": { $nin: [null, ""] } } },
-        {
-          $group: {
-            _id: { $toLower: "$exercises.name" },
-            users: { $addToSet: "$user" },
-            sessions: { $sum: 1 },
-          },
-        },
-        { $project: { _id: 0, exercise: "$_id", userCount: { $size: "$users" }, sessions: 1 } },
-        { $sort: { userCount: -1, sessions: -1 } },
-        { $limit: 50 },
-      ]),
+      Workout.aggregate(exerciseUsagePipeline(50)),
 
       // --- good vs bad rep totals (only AR sets carry these) ---
       Workout.aggregate([
@@ -425,6 +429,68 @@ export const getPresence = async (req, res) => {
     });
   } catch (error) {
     console.log("getPresence error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+//  USERS PER EXERCISE
+//  Card data: every exercise people have actually done, with distinct-user + session counts.
+export const getExerciseUsage = async (req, res) => {
+  try {
+    const usage = await Workout.aggregate(exerciseUsagePipeline(100));
+    res.json(usage);
+  } catch (error) {
+    console.log("getExerciseUsage error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+//  Drill-down: paginated list of users who have done a given exercise (optional search).
+export const getUsersByExercise = async (req, res) => {
+  try {
+    const exercise = String(req.params.exercise || "").toLowerCase();
+    const search = String(req.query.search || "").trim();
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
+    const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(escaped, "i");
+
+    const result = await Workout.aggregate([
+      { $unwind: "$exercises" },
+      { $addFields: { exLower: { $toLower: "$exercises.name" } } },
+      { $match: { exLower: exercise } },
+      { $group: { _id: "$user", sessions: { $sum: 1 }, lastUsed: { $max: "$createdAt" } } },
+      { $lookup: { from: "users", localField: "_id", foreignField: "_id", as: "user" } },
+      { $unwind: "$user" },
+      ...(search
+        ? [{ $match: { $or: [{ "user.name": re }, { "user.username": re }, { "user.email": re }] } }]
+        : []),
+      {
+        $project: {
+          _id: 0,
+          userId: "$_id",
+          sessions: 1,
+          lastUsed: 1,
+          name: "$user.name",
+          username: "$user.username",
+          email: "$user.email",
+          photo: "$user.photo",
+        },
+      },
+      { $sort: { sessions: -1, lastUsed: -1 } },
+      {
+        $facet: {
+          data: [{ $skip: (page - 1) * limit }, { $limit: limit }],
+          total: [{ $count: "count" }],
+        },
+      },
+    ]);
+
+    const data = result[0]?.data || [];
+    const total = result[0]?.total?.[0]?.count || 0;
+    res.json({ exercise, users: data, total, page, limit });
+  } catch (error) {
+    console.log("getUsersByExercise error:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
