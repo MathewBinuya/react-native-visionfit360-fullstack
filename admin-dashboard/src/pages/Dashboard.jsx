@@ -113,9 +113,9 @@ export default function Dashboard() {
           <StateBlock loading={dashLoading && !data} error={dashError}>
             <div className="stat-grid">
               <StatCard label="Total Users" value={k?.totalUsers ?? "—"} />
-              <StatCard label="Active now" value={counts?.active ?? "—"} hint="seen in last 2 min" />
-              <StatCard label="Recently active" value={counts?.recentlyActive ?? "—"} hint="seen in last 15 min" />
-              <StatCard label="Inactive" value={counts?.inactive ?? "—"} hint="older / never" />
+              <StatCard label="Active" value={k?.activeAccounts ?? "—"} hint={`logged in last ${k?.accountActiveDays ?? 7} days`} />
+              <StatCard label="Inactive" value={k?.inactiveAccounts ?? "—"} hint={`no login in ${k?.accountActiveDays ?? 7} days`} />
+              <StatCard label="Active now" value={counts?.active ?? "—"} hint="live · seen in last 2 min" />
             </div>
           </StateBlock>
         </Section>
@@ -237,7 +237,7 @@ export default function Dashboard() {
           <StateBlock loading={dashLoading && !data} error={dashError}>
             <div className="stat-grid">
               <StatCard label="New users" value={k?.newUsers ?? "—"} hint={`last ${range}d`} />
-              <StatCard label="Active users" value={k?.activeUsers ?? "—"} hint="seen in last 15 min" />
+              <StatCard label="Active users" value={k?.activeAccounts ?? "—"} hint={`logged in last ${k?.accountActiveDays ?? 7} days`} />
               <StatCard label="Sessions" value={k?.sessionsInRange ?? "—"} hint={`last ${range}d`} />
               <StatCard label="Avg rating" value={k?.avgRating ? `${k.avgRating}/5` : "—"} hint={`${k?.feedbackCount ?? 0} reviews`} />
             </div>

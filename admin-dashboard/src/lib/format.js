@@ -85,3 +85,15 @@ export const bmiInfo = (heightCm, weightKg) => {
 };
 
 export const displayName = (u) => u?.name || u?.username || "Unknown user";
+
+// Automatic account status: logged in within the last N days -> Active, else Inactive.
+// Based on the existing lastLoginAt field — no separate status system. Tunable.
+export const ACCOUNT_ACTIVE_DAYS = 7;
+
+export const accountStatus = (lastLoginAt, days = ACCOUNT_ACTIVE_DAYS) => {
+  const active =
+    !!lastLoginAt && Date.now() - new Date(lastLoginAt).getTime() <= days * 24 * 60 * 60 * 1000;
+  return active
+    ? { active: true, label: "Active", className: "badge-presence-active" }
+    : { active: false, label: "Inactive", className: "badge-presence-inactive" };
+};

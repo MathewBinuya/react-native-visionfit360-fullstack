@@ -239,14 +239,34 @@ tr.clickable:hover { background: var(--input-bg); }
 .ex-card-count { font-size: 30px; font-weight: 800; color: var(--ink); line-height: 1; }
 .ex-card-sub { font-size: 12px; color: var(--gray); margin-top: 6px; }
 
-/* toolbar + search */
-.toolbar { display: flex; gap: 10px; margin-bottom: 14px; }
+/* toolbar + search + selects */
+.toolbar { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
 .search-input {
-  flex: 1; max-width: 420px; background: var(--cards); border: 1px solid var(--border);
+  flex: 1; min-width: 200px; max-width: 420px; background: var(--cards); border: 1px solid var(--border);
   border-radius: 10px; padding: 11px 14px; font-size: 14px; color: var(--ink);
 }
 .search-input:focus { outline: none; border-color: var(--chart); }
 .search-input::placeholder { color: var(--placeholder); }
+.select {
+  background: var(--cards); border: 1px solid var(--border); border-radius: 10px;
+  padding: 11px 14px; font-size: 14px; color: var(--ink); cursor: pointer;
+}
+.select:focus { outline: none; border-color: var(--chart); }
+
+/* user identity cell (two-line) */
+.user-id { display: inline-flex; flex-direction: column; line-height: 1.3; }
+.user-id-name { font-weight: 600; color: var(--ink); }
+.user-id-handle { font-size: 12px; color: var(--muted); }
+.table-foot { font-size: 12px; color: var(--gray); padding-top: 14px; }
+
+/* user detail layout */
+.profile-header { display: flex; align-items: center; gap: 16px; }
+.profile-id { display: flex; flex-direction: column; gap: 2px; }
+.profile-name { font-size: 20px; font-weight: 700; color: var(--ink); }
+.profile-badges { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+.badge-neutral { background: var(--input-bg); color: var(--muted); }
+.detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 760px) { .detail-grid { grid-template-columns: 1fr; } }
 
 /* pager */
 .pager { display: flex; align-items: center; gap: 14px; margin-top: 16px; }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import { Section, StateBlock, Avatar } from "../components/ui";
@@ -7,15 +7,28 @@ import { exerciseLabel, relativeTime, displayName } from "../lib/format";
 
 const PAGE_SIZE = 20;
 
+const EX_SORTS = {
+  most: { label: "Most users", fn: (a, b) => b.userCount - a.userCount || b.sessions - a.sessions },
+  least: { label: "Least users", fn: (a, b) => a.userCount - b.userCount || a.sessions - b.sessions },
+  name_az: { label: "Name A–Z", fn: (a, b) => exerciseLabel(a.exercise).localeCompare(exerciseLabel(b.exercise)) },
+  name_za: { label: "Name Z–A", fn: (a, b) => exerciseLabel(b.exercise).localeCompare(exerciseLabel(a.exercise)) },
+};
+
 export default function UsersPerExercise() {
   const navigate = useNavigate();
 
   const [usage, setUsage] = useState(null);
   const [usageError, setUsageError] = useState("");
 
+  const [exSort, setExSort] = useState("most");
   const [selected, setSelected] = useState(null); // exercise key
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+
+  const sortedUsage = useMemo(
+    () => (usage ? [...usage].sort(EX_SORTS[exSort].fn) : []),
+    [usage, exSort]
+  );
 
   const [detail, setDetail] = useState(null); // { users, total, page }
   const [detailLoading, setDetailLoading] = useState(false);
@@ -71,6 +84,15 @@ export default function UsersPerExercise() {
           <Section
             title="Exercises"
             subtitle="Select an exercise to see the users who have done it"
+            actions={
+              usage && usage.length > 0 ? (
+                <select className="select" value={exSort} onChange={(e) => setExSort(e.target.value)}>
+                  {Object.entries(EX_SORTS).map(([k, v]) => (
+                    <option key={k} value={k}>{v.label}</option>
+                  ))}
+                </select>
+              ) : null
+            }
           >
             <StateBlock
               loading={!usage && !usageError}
@@ -79,7 +101,7 @@ export default function UsersPerExercise() {
               emptyText="No workout records yet."
             >
               <div className="ex-grid">
-                {usage?.map((e) => (
+                {sortedUsage.map((e) => (
                   <button key={e.exercise} className="ex-card" onClick={() => openExercise(e.exercise)}>
                     <div className="ex-card-name">{exerciseLabel(e.exercise)}</div>
                     <div className="ex-card-count">{e.userCount}</div>

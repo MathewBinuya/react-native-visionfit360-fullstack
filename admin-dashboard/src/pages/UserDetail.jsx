@@ -1,28 +1,26 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
-import { PresenceBadge, RatingStars, Avatar, StateBlock } from "../components/ui";
+import { RatingStars, Avatar, StateBlock } from "../components/ui";
 import api from "../lib/api";
 import {
-  relativeTime, dateTime, shortDate, ageFromDob, bmiInfo, exerciseLabel, displayName,
+  relativeTime, dateTime, shortDate, ageFromDob, bmiInfo, exerciseLabel, displayName, accountStatus,
 } from "../lib/format";
 
-// mirror the backend presence windows so the badge matches the dashboard
-const ACTIVE_MS = 2 * 60 * 1000;
-const RECENT_MS = 15 * 60 * 1000;
 const GOAL_LABELS = {
   get_fit: "Get fit",
   maintain_weight: "Maintain weight",
   get_lean: "Get lean",
 };
 
-const presenceOf = (lastActiveAt) => {
-  if (!lastActiveAt) return "inactive";
-  const age = Date.now() - new Date(lastActiveAt).getTime();
-  if (age <= ACTIVE_MS) return "active";
-  if (age <= RECENT_MS) return "recently_active";
-  return "inactive";
-};
+function Row({ label, value }) {
+  return (
+    <div className="info-row">
+      <span>{label}</span>
+      <span>{value ?? "Not specified"}</span>
+    </div>
+  );
+}
 
 export default function UserDetail() {
   const { id } = useParams();
@@ -41,19 +39,10 @@ export default function UserDetail() {
 
   useEffect(() => { load(); }, [load]);
 
-  const toggleStatus = async () => {
-    const newStatus = data.user.status === "inactive" ? "active" : "inactive";
-    try {
-      const res = await api.patch(`/users/${id}/status`, { status: newStatus });
-      setData({ ...data, user: res.data });
-    } catch (err) {
-      alert(err.response?.data?.message || "Failed to update status");
-    }
-  };
-
   const u = data?.user;
   const age = u ? ageFromDob(u.dateOfBirth) : null;
   const bmi = u ? bmiInfo(u.heightCm, u.weightKg) : null;
+  const st = u ? accountStatus(u.lastLoginAt) : null;
 
   return (
     <div className="layout">
@@ -67,44 +56,42 @@ export default function UserDetail() {
         <StateBlock loading={loading && !data} error={error}>
           {u && (
             <>
-              <div className="card">
-                <div className="user-cell" style={{ marginBottom: 16 }}>
-                  <Avatar user={u} size={48} />
-                  <div>
-                    <div style={{ fontSize: 18, fontWeight: 700 }}>{displayName(u)}</div>
-                    <div className="muted" style={{ fontSize: 13 }}>@{u.username}</div>
-                  </div>
-                  <span style={{ marginLeft: "auto" }}>
-                    <PresenceBadge status={presenceOf(u.lastActiveAt)} />
-                  </span>
+              <div className="card profile-header">
+                <Avatar user={u} size={64} />
+                <div className="profile-id">
+                  <div className="profile-name">{displayName(u)}</div>
+                  <div className="muted">@{u.username}</div>
+                </div>
+                <div className="profile-badges">
+                  <span className={`badge ${st.className}`}>{st.label}</span>
+                  {u.goal && <span className="badge badge-neutral">{GOAL_LABELS[u.goal] || u.goal}</span>}
+                </div>
+              </div>
+
+              <div className="detail-grid">
+                <div className="card">
+                  <h3 className="card-title">Account &amp; activity</h3>
+                  <Row label="Email" value={u.email} />
+                  <Row label="Status" value={<span className={`badge ${st.className}`}>{st.label}</span>} />
+                  <Row label="Last login" value={u.lastLoginAt ? relativeTime(u.lastLoginAt) : "Never"} />
+                  <Row label="Last active" value={u.lastActiveAt ? relativeTime(u.lastActiveAt) : "Never"} />
+                  <Row label="Joined" value={dateTime(u.createdAt)} />
+                  <Row label="Goal" value={GOAL_LABELS[u.goal] || null} />
                 </div>
 
-                <div className="info-row"><span>Email</span><span>{u.email}</span></div>
-                <div className="info-row"><span>Gender</span><span>{u.gender || "Not specified"}</span></div>
-                <div className="info-row"><span>Goal</span><span>{GOAL_LABELS[u.goal] || "Not specified"}</span></div>
-                <div className="info-row"><span>Age</span><span>{age != null ? `${age} yrs` : "Not specified"}</span></div>
-                <div className="info-row"><span>Height</span><span>{u.heightCm ? `${u.heightCm} cm` : "Not specified"}</span></div>
-                <div className="info-row"><span>Weight</span><span>{u.weightKg ? `${u.weightKg} kg` : "Not specified"}</span></div>
-                <div className="info-row">
-                  <span>BMI</span>
-                  <span>{bmi ? `${bmi.bmi} (${bmi.category})` : "Not specified"}</span>
+                <div className="card">
+                  <h3 className="card-title">Body &amp; demographics</h3>
+                  <Row label="Gender" value={u.gender ? u.gender.charAt(0).toUpperCase() + u.gender.slice(1) : null} />
+                  <Row label="Date of birth" value={u.dateOfBirth ? shortDate(u.dateOfBirth) : null} />
+                  <Row label="Age" value={age != null ? `${age} yrs` : null} />
+                  <Row label="Height" value={u.heightCm ? `${u.heightCm} cm` : null} />
+                  <Row label="Weight" value={u.weightKg ? `${u.weightKg} kg` : null} />
+                  <Row label="BMI" value={bmi ? `${bmi.bmi} (${bmi.category})` : null} />
                 </div>
-                <div className="info-row"><span>Joined</span><span>{dateTime(u.createdAt)}</span></div>
-                <div className="info-row"><span>Last login</span><span>{u.lastLoginAt ? relativeTime(u.lastLoginAt) : "Never"}</span></div>
-                <div className="info-row"><span>Last active</span><span>{u.lastActiveAt ? relativeTime(u.lastActiveAt) : "Never"}</span></div>
-                <div className="info-row">
-                  <span>Account status</span>
-                  <span className={u.status === "inactive" ? "badge-inactive" : "badge-active"}>
-                    {u.status || "active"}
-                  </span>
-                </div>
-                <button className="btn-small" style={{ marginTop: 16 }} onClick={toggleStatus}>
-                  {u.status === "inactive" ? "Set Active" : "Set Inactive"}
-                </button>
               </div>
 
               <div className="card">
-                <h2>Workout History ({data.workouts.length})</h2>
+                <h3 className="card-title">Workout history ({data.workouts.length})</h3>
                 <StateBlock empty={data.workouts.length === 0} emptyText="No workouts.">
                   <table className="rows">
                     <thead>
@@ -127,7 +114,7 @@ export default function UserDetail() {
               </div>
 
               <div className="card">
-                <h2>Feedback ({data.feedback?.length || 0})</h2>
+                <h3 className="card-title">Feedback ({data.feedback?.length || 0})</h3>
                 <StateBlock empty={!data.feedback?.length} emptyText="No feedback from this user.">
                   <ul className="feedback-list">
                     {data.feedback?.map((f) => (
