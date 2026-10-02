@@ -8,6 +8,10 @@ export const RECENTLY_ACTIVE_WINDOW_MS = 15 * 60 * 1000; // seen within 15 min -
 // How long we keep raw login events before the TTL index removes them.
 export const LOGIN_EVENT_TTL_DAYS = 90;
 
+// Account-level status (distinct from live presence above): logged in within this
+// many days = Active, else Inactive. Mirrors the admin Users page rule. Tunable.
+export const ACCOUNT_ACTIVE_DAYS = 7;
+
 // Derive a status string from a lastActiveAt value (Date | null | undefined).
 export const presenceStatus = (lastActiveAt, now = Date.now()) => {
   if (!lastActiveAt) return "inactive";

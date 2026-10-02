@@ -8,6 +8,7 @@ import LoginEvent from "../models/loginEvent.model.js";
 import {
   ACTIVE_WINDOW_MS,
   RECENTLY_ACTIVE_WINDOW_MS,
+  ACCOUNT_ACTIVE_DAYS,
   presenceStatus,
 } from "../lib/presence.js";
 
@@ -160,11 +161,13 @@ export const getDashboard = async (req, res) => {
     const now = new Date();
     const rangeStart = new Date(now.getTime() - range * DAY_MS);
     const recentlyActiveThreshold = new Date(now.getTime() - RECENTLY_ACTIVE_WINDOW_MS);
+    const accountActiveThreshold = new Date(now.getTime() - ACCOUNT_ACTIVE_DAYS * DAY_MS);
 
     const [
       totalUsers,
       newUsers,
       activeUsers,
+      activeAccounts,
       totalSessions,
       sessionsInRange,
       demographics,
@@ -180,6 +183,7 @@ export const getDashboard = async (req, res) => {
       User.countDocuments(),
       User.countDocuments({ createdAt: { $gte: rangeStart } }),
       User.countDocuments({ lastActiveAt: { $gte: recentlyActiveThreshold } }),
+      User.countDocuments({ lastLoginAt: { $gte: accountActiveThreshold } }),
       Workout.countDocuments(),
       Workout.countDocuments({ createdAt: { $gte: rangeStart } }),
 
@@ -338,7 +342,10 @@ export const getDashboard = async (req, res) => {
       kpis: {
         totalUsers,
         newUsers,
-        activeUsers, // seen within the "recently active" window
+        activeUsers, // live presence: seen within the "recently active" window
+        activeAccounts, // account status: logged in within ACCOUNT_ACTIVE_DAYS
+        inactiveAccounts: Math.max(0, totalUsers - activeAccounts),
+        accountActiveDays: ACCOUNT_ACTIVE_DAYS,
         totalSessions,
         sessionsInRange,
         avgRating: fbSummary.avg ? +fbSummary.avg.toFixed(2) : 0,
