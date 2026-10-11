@@ -1,5 +1,8 @@
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
 import Admin from "../models/admin.model.js";
+import { sendEmail } from "../lib/email.js";
+import { ADMIN_EMAIL, isAllowedAdmin } from "../lib/adminAccess.js";
 import User from "../models/user.model.js";
 import Workout from "../models/workout.model.js";
 import Exercise from "../models/exercise.model.js";
@@ -40,19 +43,166 @@ const exerciseUsagePipeline = (limit = 50) => [
 ];
 
 //  AUTH 
+// Two-step login: password, then a 6-digit code emailed to ADMIN_EMAIL.
+// Login responses never use 401 — the dashboard's API client treats 401 as
+// "session expired" and reloads to /login, which would interrupt this flow.
+const OTP_TTL_MS = 10 * 60 * 1000;
+const OTP_RESEND_MS = 60 * 1000;
+const OTP_MAX_ATTEMPTS = 5;
+const OTP_SELECT = "+otpHash +otpExpiresAt +otpAttempts +otpSentAt";
+
+const hashOtp = (code) => crypto.createHash("sha256").update(String(code).trim()).digest("hex");
+
+const otpMatches = (code, hash) => {
+  if (!hash) return false;
+  const a = Buffer.from(hashOtp(code), "hex");
+  const b = Buffer.from(hash, "hex");
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+};
+
+// Short-lived pass between step 1 and step 2. Its role is NOT "admin", so
+// adminProtect rejects it for every dashboard route.
+const otpChallenge = (id) =>
+  jwt.sign({ id, role: "admin-otp" }, process.env.JWT_SECRET, { expiresIn: Math.floor(OTP_TTL_MS / 1000) });
+
+const readChallenge = (token) => {
+  try {
+    const decoded = jwt.verify(String(token || ""), process.env.JWT_SECRET);
+    return decoded.role === "admin-otp" ? decoded.id : null;
+  } catch {
+    return null;
+  }
+};
+
+const maskEmail = (email) => {
+  const [name, domain] = email.split("@");
+  return `${name.slice(0, 2)}${"•".repeat(Math.max(3, name.length - 2))}@${domain}`;
+};
+
+const otpEmailHtml = (code) => `
+  <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 32px; background: #f7f7f7; border-radius: 12px;">
+    <h2 style="color: #111111; margin-bottom: 8px;">Admin sign-in code</h2>
+    <p style="color: #555; margin-bottom: 24px;">Someone signed in to the VisionFIT360 admin dashboard with the correct password. Enter this code to finish signing in.</p>
+    <div style="background: #ffffff; border-radius: 10px; padding: 24px; text-align: center; margin-bottom: 24px;">
+      <p style="color: #888; font-size: 13px; margin-bottom: 8px;">YOUR LOGIN CODE</p>
+      <p style="font-size: 36px; font-weight: 900; letter-spacing: 8px; color: #111111; margin: 0;">${code}</p>
+    </div>
+    <p style="color: #888; font-size: 13px; text-align: center;">This code expires in <strong>10 minutes</strong>.</p>
+    <p style="color: #bbb; font-size: 12px; text-align: center; margin-top: 24px;">If this wasn't you, change the admin password right away.</p>
+  </div>
+`;
+
+// Issues + emails a fresh code. Returns false if the email could not be sent.
+const sendAdminOtp = async (admin) => {
+  const code = crypto.randomInt(100000, 1000000).toString();
+  admin.otpHash = hashOtp(code);
+  admin.otpExpiresAt = new Date(Date.now() + OTP_TTL_MS);
+  admin.otpAttempts = 0;
+  admin.otpSentAt = new Date();
+  await admin.save();
+  try {
+    await sendEmail({ to: ADMIN_EMAIL, subject: "VisionFIT360 — Admin login code", html: otpEmailHtml(code) });
+    return true;
+  } catch (err) {
+    console.log("Admin OTP email failed:", err.message);
+    admin.otpHash = undefined;
+    admin.otpExpiresAt = undefined;
+    admin.otpSentAt = undefined;
+    await admin.save();
+    return false;
+  }
+};
+
+const otpStepResponse = (admin) => ({
+  otpRequired: true,
+  challenge: otpChallenge(admin._id),
+  email: maskEmail(ADMIN_EMAIL),
+  expiresInSeconds: Math.max(0, Math.round((admin.otpExpiresAt - Date.now()) / 1000)),
+  resendInSeconds: Math.max(0, Math.ceil((admin.otpSentAt.getTime() + OTP_RESEND_MS - Date.now()) / 1000)),
+});
+
+// STEP 1 — email + password. Only ADMIN_EMAIL may sign in.
 export const adminLogin = async (req, res) => {
   try {
-    const { email, password } = req.body;
-    const admin = await Admin.findOne({ email });
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const { password } = req.body;
+    if (email !== ADMIN_EMAIL) return res.status(400).json({ message: "Invalid credentials" });
+
+    const admin = await Admin.findOne({ email }).select(OTP_SELECT);
     if (!admin) return res.status(400).json({ message: "Invalid credentials" });
 
-    const match = await admin.comparePassword(password);
+    const match = await admin.comparePassword(String(password || ""));
     if (!match) return res.status(400).json({ message: "Invalid credentials" });
+
+    // A still-valid code sent under a minute ago is reused instead of emailing again.
+    const recent = admin.otpHash && admin.otpExpiresAt > new Date() && Date.now() - admin.otpSentAt < OTP_RESEND_MS;
+    if (!recent && !(await sendAdminOtp(admin))) {
+      return res.status(502).json({ message: "Couldn't send the login code. Please try again." });
+    }
+    res.json(otpStepResponse(admin));
+  } catch (error) {
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// STEP 2 — the emailed code. Returns the real admin token.
+export const verifyAdminOtp = async (req, res) => {
+  try {
+    const id = readChallenge(req.body.challenge);
+    if (!id) return res.status(400).json({ message: "Your sign-in expired. Please sign in again.", restart: true });
+
+    const admin = await Admin.findById(id).select(OTP_SELECT);
+    if (!isAllowedAdmin(admin) || !admin.otpHash) {
+      return res.status(400).json({ message: "Please sign in again.", restart: true });
+    }
+    if (admin.otpExpiresAt < new Date()) {
+      return res.status(400).json({ message: "This code has expired. Tap Resend code.", expired: true });
+    }
+
+    if (!otpMatches(req.body.code, admin.otpHash)) {
+      admin.otpAttempts = (admin.otpAttempts || 0) + 1;
+      if (admin.otpAttempts >= OTP_MAX_ATTEMPTS) {
+        admin.otpHash = undefined;
+        admin.otpExpiresAt = undefined;
+        await admin.save();
+        return res.status(400).json({ message: "Too many wrong codes. Please sign in again.", restart: true });
+      }
+      await admin.save();
+      const left = OTP_MAX_ATTEMPTS - admin.otpAttempts;
+      return res.status(400).json({ message: `Incorrect code. ${left} attempt${left === 1 ? "" : "s"} left.` });
+    }
+
+    admin.otpHash = undefined;
+    admin.otpExpiresAt = undefined;
+    admin.otpAttempts = 0;
+    await admin.save();
 
     res.json({
       token: generateAdminToken(admin._id),
       admin: { id: admin._id, username: admin.username, email: admin.email, name: admin.name },
     });
+  } catch (error) {
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// Resend the code (once per minute) without re-entering the password.
+export const resendAdminOtp = async (req, res) => {
+  try {
+    const id = readChallenge(req.body.challenge);
+    if (!id) return res.status(400).json({ message: "Your sign-in expired. Please sign in again.", restart: true });
+
+    const admin = await Admin.findById(id).select(OTP_SELECT);
+    if (!isAllowedAdmin(admin)) return res.status(400).json({ message: "Please sign in again.", restart: true });
+
+    const wait = admin.otpSentAt ? admin.otpSentAt.getTime() + OTP_RESEND_MS - Date.now() : 0;
+    if (wait > 0) {
+      return res.status(429).json({ message: `Please wait ${Math.ceil(wait / 1000)}s before resending.`, resendInSeconds: Math.ceil(wait / 1000) });
+    }
+    if (!(await sendAdminOtp(admin))) {
+      return res.status(502).json({ message: "Couldn't send the login code. Please try again." });
+    }
+    res.json(otpStepResponse(admin));
   } catch (error) {
     res.status(500).json({ message: "Server error" });
   }

@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import Admin from "../models/admin.model.js";
+import { isAllowedAdmin } from "../lib/adminAccess.js";
 
 const adminProtect = async (req, res, next) => {
   try {
@@ -16,6 +17,7 @@ const adminProtect = async (req, res, next) => {
     }
     const admin = await Admin.findById(decoded.id).select("-password");
     if (!admin) return res.status(401).json({ message: "Admin not found" });
+    if (!isAllowedAdmin(admin)) return res.status(403).json({ message: "Admin access required" });
 
     req.admin = admin;
     next();

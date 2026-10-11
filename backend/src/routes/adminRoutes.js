@@ -1,7 +1,7 @@
 import express from "express";
 import adminProtect from "../middleware/admin.middleware.js";
 import {
-  adminLogin, getStats, getDashboard, getPresence,
+  adminLogin, verifyAdminOtp, resendAdminOtp, getStats, getDashboard, getPresence,
   getExerciseUsage, getUsersByExercise,
   getUsers, getUserById, deleteUser, updateUserStatus,
   getExercises, createExercise, updateExercise, deleteExercise,
@@ -11,7 +11,9 @@ import {
 const router = express.Router();
 
 // public
-router.post("/login", adminLogin);
+router.post("/login", adminLogin);              // step 1: password -> emails a code
+router.post("/login/verify", verifyAdminOtp);   // step 2: code -> admin token
+router.post("/login/resend", resendAdminOtp);   // resend code (60s cooldown)
 
 // protected (admin only)
 router.get("/stats", adminProtect, getStats);         // legacy counts (kept for back-compat)
