@@ -183,7 +183,15 @@ export const getDashboard = async (req, res) => {
       User.countDocuments(),
       User.countDocuments({ createdAt: { $gte: rangeStart } }),
       User.countDocuments({ lastActiveAt: { $gte: recentlyActiveThreshold } }),
-      User.countDocuments({ lastLoginAt: { $gte: accountActiveThreshold } }),
+      // Account Active = used OR logged into the app within ACCOUNT_ACTIVE_DAYS.
+      // Keyed off lastActiveAt (heartbeat) so persistent sessions still count as
+      // active; falls back to lastLoginAt for any legacy row missing lastActiveAt.
+      User.countDocuments({
+        $or: [
+          { lastActiveAt: { $gte: accountActiveThreshold } },
+          { lastLoginAt: { $gte: accountActiveThreshold } },
+        ],
+      }),
       Workout.countDocuments(),
       Workout.countDocuments({ createdAt: { $gte: rangeStart } }),
 
@@ -194,37 +202,7 @@ export const getDashboard = async (req, res) => {
             gender: [
               { $group: { _id: { $ifNull: ["$gender", "Not specified"] }, count: { $sum: 1 } } },
             ],
-            ageGroups: [
-              {
-                $addFields: {
-                  age: {
-                    $cond: [
-                      { $ifNull: ["$dateOfBirth", false] },
-                      { $dateDiff: { startDate: "$dateOfBirth", endDate: "$$NOW", unit: "year" } },
-                      null,
-                    ],
-                  },
-                },
-              },
-              {
-                $addFields: {
-                  ageGroup: {
-                    $switch: {
-                      branches: [
-                        { case: { $eq: ["$age", null] }, then: "Not specified" },
-                        { case: { $lt: ["$age", 18] }, then: "Under 18" },
-                        { case: { $lt: ["$age", 25] }, then: "18-24" },
-                        { case: { $lt: ["$age", 35] }, then: "25-34" },
-                        { case: { $lt: ["$age", 45] }, then: "35-44" },
-                        { case: { $lt: ["$age", 55] }, then: "45-54" },
-                      ],
-                      default: "55+",
-                    },
-                  },
-                },
-              },
-              { $group: { _id: "$ageGroup", count: { $sum: 1 } } },
-            ],
+            // (Age demographics intentionally omitted — Age is not shown in the admin.)
             bmiCategories: [
               {
                 $addFields: {
@@ -353,7 +331,6 @@ export const getDashboard = async (req, res) => {
       },
       demographics: {
         gender: demo.gender || [],
-        ageGroups: demo.ageGroups || [],
         bmiCategories: demo.bmiCategories || [],
         body: (demo.body && demo.body[0]) || null,
       },

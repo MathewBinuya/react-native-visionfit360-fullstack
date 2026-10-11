@@ -2,6 +2,8 @@ import { SchemaType } from "@google/generative-ai";
 import { model } from "../lib/gemini.js";
 import User from "../models/user.model.js";
 import Workout from "../models/workout.model.js";
+import { getUserAnalytics } from "../lib/workoutAnalytics.js";
+import { EXERCISE_CATALOG, CATALOG_NAMES, canonicalExerciseName, catalogPromptLines } from "../lib/exerciseCatalog.js";
 
 //  helper - call Gemini with automatic retry on rate limit (429)
 const generateWithRetry = async (contents, generationConfig, maxRetries = 3) => {
@@ -43,54 +45,123 @@ const isRateLimitError = (err) => {
 //  goal guidance — patterns, NOT rigid rules. Keep in sync with the mobile enum.
 const GOAL_GUIDANCE = {
   get_fit:
-    "Goal: Get Fit — favour general strength, cardio, mobility and consistency.",
+    "Goal: Get Fit — balanced strength and conditioning for general fitness, moderate volume (about 3 sets per exercise), mix strength moves with some cardio.",
   maintain_weight:
-    "Goal: Maintain Weight — sustainable activity with a balance of strength and cardio.",
+    "Goal: Maintain Weight — consistency-focused, balanced volume, maintain strength with moderate loads, include reasonable cardio. Sustainable over intense.",
   get_lean:
-    "Goal: Get Lean / Ripped — resistance training with progressive overload plus appropriate cardio toward sustainable body-composition goals. No crash diets or extreme advice.",
+    "Goal: Get Lean / Ripped — resistance training first with progressive overload (build on the user's previous weights/reps), higher volume where appropriate (3–4 sets, 8–15 reps), plus conditioning/cardio when suitable. No crash diets or extreme advice.",
+};
+
+// BMI is a training-personalization signal only — never a diagnosis.
+const BMI_GUIDANCE = {
+  underweight:
+    "BMI guidance (underweight range): emphasise resistance/strength work, moderate volume, keep cardio light, allow full rest (75–120s).",
+  normal:
+    "BMI guidance (normal range): standard intensity and volume for the user's level.",
+  overweight:
+    "BMI guidance (overweight range): moderate intensity, mix strength with low-impact conditioning, rest 60–90s, offer beginner-friendly progressions.",
+  obese:
+    "BMI guidance (obesity range): prioritise low-impact moves (avoid high-impact cardio like Jumping Jacks / High Knees unless the user asks or their history shows they handle it), moderate sets/reps, longer rest (90–120s), build volume gradually.",
+};
+
+// Gender is ONE soft factor: it may nudge emphasis, never restrict or change difficulty.
+const GENDER_GUIDANCE = {
+  female:
+    "Gender: female. You may lean slightly toward lower-body/glute and full-body work that many women commonly prefer, but still include upper-body strength. Do NOT reduce weights, volume or difficulty because of gender.",
+  male:
+    "Gender: male. You may lean slightly toward upper-body strength work that many men commonly prefer, but still include lower body and core. Do NOT increase weights, volume or difficulty because of gender.",
+  other: "Gender: other — no gender-based emphasis.",
 };
 
 const bmiCategory = (bmi) =>
   bmi < 18.5 ? "underweight" : bmi < 25 ? "normal" : bmi < 30 ? "overweight" : "obese";
 
-//  Build the Gemini context from STRUCTURED, validated fields only.
-//  Never include free-text fields (bio, display name).
-const buildUserContext = async (userId) => {
-  const user = await User.findById(userId).select("-password");
-  const recent = await Workout.find({ user: userId, completed: true })
-    .sort({ date: -1 })
-    .limit(5);
+const ageFrom = (dob) => {
+  if (!dob) return null;
+  const d = new Date(dob);
+  if (isNaN(d)) return null;
+  const now = new Date();
+  let age = now.getFullYear() - d.getFullYear();
+  if (now < new Date(now.getFullYear(), d.getMonth(), d.getDate())) age--;
+  return age > 0 && age < 120 ? age : null;
+};
 
-  let bmiLine = "BMI unknown";
+// Estimated from logged history only (there is no self-reported level field).
+const estimateLevel = ({ totalWorkouts, avgWorkoutsPerWeek }) => {
+  if (totalWorkouts < 6 || avgWorkoutsPerWeek < 1) return "beginner";
+  if (totalWorkouts >= 40 && avgWorkoutsPerWeek >= 4) return "advanced";
+  return "intermediate";
+};
+
+// Exercise names are user-typed; canonicalise to the catalog or strip to safe characters.
+const safeExerciseName = (name) =>
+  canonicalExerciseName(name) || String(name || "").replace(/[^A-Za-z0-9 \-]/g, "").trim().slice(0, 40) || "exercise";
+
+const describeSession = (w) => {
+  const date = new Date(w.completedAt || w.date).toISOString().slice(0, 10);
+  const parts = (w.exercises || []).slice(0, 6).map((ex) => {
+    const sets = (ex.sets || []).filter((s) => s.reps > 0);
+    if (!sets.length) return safeExerciseName(ex.name);
+    const top = sets.reduce((a, b) => ((b.weightKg || 0) > (a.weightKg || 0) ? b : a));
+    return `${safeExerciseName(ex.name)} ${sets.length}x${top.reps}${top.weightKg ? ` @ ${top.weightKg}kg` : ""}`;
+  });
+  return `${date}: ${parts.join(", ") || "no exercises"}`;
+};
+
+//  Build the Gemini context from STRUCTURED, validated fields only.
+//  Never include free-text fields (bio, display name, workout titles).
+const buildUserContext = async (userId) => {
+  const [user, recent, analytics] = await Promise.all([
+    User.findById(userId).select("-password"),
+    Workout.find({ user: userId, completed: true }).sort({ completedAt: -1, date: -1 }).limit(5).lean(),
+    getUserAnalytics(userId, { weeks: 6 }),
+  ]);
+  const { summary, records, weeks } = analytics;
+
+  const lines = [];
+
   if (user?.heightCm && user?.weightKg) {
     const h = user.heightCm / 100;
     const bmi = user.weightKg / (h * h);
-    bmiLine = `BMI ${bmi.toFixed(1)} (${bmiCategory(bmi)}; height ${user.heightCm}cm, weight ${user.weightKg}kg)`;
+    const cat = bmiCategory(bmi);
+    lines.push(`BMI ${bmi.toFixed(1)} (${cat} range; height ${user.heightCm} cm, weight ${user.weightKg} kg). ${BMI_GUIDANCE[cat]}`);
+  } else {
+    lines.push("BMI unknown — use standard intensity for the user's level.");
   }
 
-  const goalLine = user?.goal && GOAL_GUIDANCE[user.goal]
-    ? GOAL_GUIDANCE[user.goal]
-    : "Goal: not specified — assume general fitness.";
+  const age = ageFrom(user?.dateOfBirth);
+  if (age) lines.push(`Age: ${age}.`);
 
-  // light performance signal from recent history (no free text beyond our own titles)
-  const activity =
-    recent.length >= 3 ? "trains regularly" :
-    recent.length >= 1 ? "trains occasionally" :
-    "little recent training logged";
+  lines.push(GENDER_GUIDANCE[user?.gender] || "Gender: unspecified — no gender-based emphasis.");
+  lines.push(GOAL_GUIDANCE[user?.goal] || GOAL_GUIDANCE.get_fit);
 
-  const recentLine = recent.length
-    ? recent.map((w) => `${w.title} (${w.exercises?.length || 0} exercises)`).join(", ")
-    : "no recent workouts";
+  const level = estimateLevel(summary);
+  lines.push(
+    `Estimated fitness level: ${level} (from ${summary.totalWorkouts} logged workouts, ~${summary.avgWorkoutsPerWeek}/week over the last 4 weeks; ` +
+    `${summary.daysSinceLastWorkout == null ? "no workouts logged yet" : `last workout ${summary.daysSinceLastWorkout} day(s) ago`}).`
+  );
 
-  const genderLine = user?.gender
-    ? `Gender: ${user.gender} (context only).`
-    : "Gender: unspecified.";
+  if (summary.totalWorkouts) {
+    const vol = weeks.slice(-4).map((w) => `${w.weekStart}: ${w.workouts} workouts, ${w.volume} kg`).join("; ");
+    lines.push(`Weekly training (volume = reps x kg): ${vol}.`);
+  }
+  if (recent.length) lines.push(`Recent sessions: ${recent.map(describeSession).join(" | ")}.`);
+
+  const best = records.slice(0, 6).map((r) => `${safeExerciseName(r.exercise)} ${r.bestKg} kg`);
+  if (best.length) {
+    lines.push(`Heaviest recorded weights: ${best.join(", ")}. Base suggested weights on these — progress by small steps (about 1–2.5 kg or 1–2 reps) only when appropriate, never large jumps.`);
+  }
 
   return (
-    `User profile: ${bmiLine}. ${goalLine} ${genderLine} Activity: ${activity}. Recent workouts: ${recentLine}. ` +
-    `Use all of this as COMBINED context. Do NOT stereotype by gender — never make a workout easier or harder based on gender alone. Tailor to the goal, BMI and training history together.`
+    `User profile:\n- ${lines.join("\n- ")}\n` +
+    `Combine ALL of these factors. Gender is only one soft factor — the user can train any muscle group and any supported exercise. BMI is not a medical diagnosis. ` +
+    `If there's little history, start conservatively and beginner-friendly. Avoid repeating the exact same focus as the most recent session when possible. Always prioritise good form over load.`
   );
 };
+
+const CATALOG_RULE =
+  `Supported VisionFit exercises (use ONLY these, with the name spelled exactly as listed):\n${catalogPromptLines()}\n` +
+  `Use 0 for weightKg on bodyweight and cardio exercises. For weighted exercises suggest a realistic dumbbell/barbell weight for this user (0 is allowed if they have no equipment history).`;
 
 // ----- server-side validation / clamping of AI output (defense-in-depth) -----
 // Gemini output is untrusted. We clamp to sane ranges, drop malformed entries,
@@ -106,21 +177,29 @@ const clampFloat = (n, lo, hi, dflt) => {
   return Math.min(hi, Math.max(lo, Math.round(x * 10) / 10));
 };
 
-const sanitizeSets = (sets) =>
+const sanitizeSets = (sets, weighted) =>
   (Array.isArray(sets) ? sets : [])
     .slice(0, 12)
     .map((s) => ({
       reps: clampInt(s?.reps, 1, 100, 10),
-      weightKg: clampFloat(s?.weightKg, 0, 500, 0),
+      weightKg: weighted ? clampFloat(s?.weightKg, 0, 500, 0) : 0,
       restSeconds: clampInt(s?.restSeconds, 0, 600, 60),
     }));
 
+// Only exercises VisionFit supports survive; names are normalised to the catalog.
 const sanitizeExercises = (exercises) =>
   (Array.isArray(exercises) ? exercises : [])
     .filter((e) => e && typeof e.name === "string" && e.name.trim())
+    .map((e) => ({ ...e, name: canonicalExerciseName(e.name) }))
+    .filter((e) => e.name)
     .slice(0, 15)
-    .map((e) => ({ name: e.name.trim().slice(0, 60), sets: sanitizeSets(e.sets) }))
+    .map((e) => {
+      const weighted = EXERCISE_CATALOG.find((c) => c.name === e.name)?.kind === "weighted";
+      return { name: e.name, sets: sanitizeSets(e.sets, weighted) };
+    })
     .filter((e) => e.sets.length > 0);
+
+const exerciseNameSchema = { type: SchemaType.STRING, format: "enum", enum: CATALOG_NAMES };
 
 const sanitizeText = (t, max) =>
   (typeof t === "string" ? t.trim().slice(0, max) : "");
@@ -135,7 +214,7 @@ const workoutRecommendationSchema = {
       items: {
         type: SchemaType.OBJECT,
         properties: {
-          name: { type: SchemaType.STRING },
+          name: exerciseNameSchema,
           sets: {
             type: SchemaType.ARRAY,
             items: {
@@ -161,7 +240,8 @@ export const recommendWorkout = async (req, res) => {
     const context = await buildUserContext(req.user.id);
 
     const prompt = `You are a friendly, encouraging fitness coach. ${context}
-Recommend a single workout for today suited to this person. Keep the intro short and motivating (one sentence). Include 4-6 exercises with realistic sets, reps, and rest times. Use 0 for weightKg on bodyweight exercises.`;
+${CATALOG_RULE}
+Recommend a single workout for today built specifically for THIS person — choose exercises, intensity, sets, reps, weights and rest from their goal, BMI, estimated level, gender emphasis and recent training. Keep the intro short and motivating (one sentence) and make it reflect why this workout suits them. Include 4-6 exercises.`;
 
     const raw = await generateWithRetry(
       [{ role: "user", parts: [{ text: prompt }] }],
@@ -225,7 +305,7 @@ const chatResponseSchema = {
       items: {
         type: SchemaType.OBJECT,
         properties: {
-          name: { type: SchemaType.STRING },
+          name: exerciseNameSchema,
           sets: {
             type: SchemaType.ARRAY,
             items: {
@@ -256,7 +336,7 @@ export const chatWithCoach = async (req, res) => {
     const history = [
       {
         role: "user",
-        parts: [{ text: `You are a friendly fitness coach for a workout app. ${context} Answer the user's fitness questions concisely and practically. Keep responses short. If the user asks for a workout, routine, or exercise plan, set responseType to "workout" and provide structured exercises with realistic sets/reps/rest (use 0 weightKg for bodyweight moves). For anything else, set responseType to "chat".` }],
+        parts: [{ text: `You are a friendly fitness coach for the VisionFit app. ${context}\n${CATALOG_RULE}\nAnswer the user's fitness questions concisely and practically, personalised to their profile. Keep responses short. If the user asks for a workout, routine, or exercise plan, set responseType to "workout" and provide structured exercises tailored to them, honouring any muscle group or exercise they ask for. If they ask for an exercise VisionFit doesn't support, briefly say so and use the closest supported alternative. For anything else, set responseType to "chat".` }],
       },
       {
         role: "model",

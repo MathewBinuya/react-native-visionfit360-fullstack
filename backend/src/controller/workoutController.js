@@ -1,4 +1,15 @@
 import Workout from "../models/workout.model.js";
+import { getUserAnalytics } from "../lib/workoutAnalytics.js";
+
+// Weekly volume / workout counts / PRs / overload feedback, derived from completed workouts.
+export const getAnalytics = async (req, res) => {
+  try {
+    const weeks = Math.min(26, Math.max(4, parseInt(req.query.weeks, 10) || 8));
+    res.json(await getUserAnalytics(req.user.id, { weeks }));
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
 
 export const createWorkout = async (req, res) => {
   try {

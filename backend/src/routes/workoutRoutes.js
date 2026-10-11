@@ -8,12 +8,14 @@ import {
   completeWorkout,
   deleteWorkout,
   getExerciseProgress,
+  getAnalytics,
 } from "../controller/workoutController.js";
 
 const router = express.Router();
 
 router.post("/", auth, createWorkout);
 router.get("/", auth, getWorkouts);                          //  completed=true/false to filter
+router.get("/analytics", auth, getAnalytics);              // weekly progress, PRs, insights
 router.get("/progress/:name", auth, getExerciseProgress);   // progressive overload
 router.patch("/:id/complete", auth, completeWorkout);      //   mark as done
 router.get("/:id", auth, getWorkout);
