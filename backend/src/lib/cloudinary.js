@@ -1,5 +1,4 @@
 import { v2 as cloudinary } from "cloudinary";
-import { CloudinaryStorage } from "multer-storage-cloudinary";
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -7,14 +6,25 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-const storage = new CloudinaryStorage({
-  cloudinary,
-  params: {
-    folder: "profile_photos",
-    allowed_formats: ["jpg", "jpeg", "png", "webp"],
-    transformation: [{ width: 500, height: 500, crop: "fill", gravity: "face" }],
-    public_id: (req) => `user_${req.user.id}`,
-  },
-});
+// Profile photos: one image per user (re-uploads overwrite), face-cropped to 500x500.
+// All options are fixed server-side — nothing from the request is passed through.
+const PROFILE_PHOTO_OPTIONS = {
+  folder: "profile_photos",
+  allowed_formats: ["jpg", "jpeg", "png", "webp"],
+  transformation: [{ width: 500, height: 500, crop: "fill", gravity: "face" }],
+  overwrite: true,
+  invalidate: true,
+  resource_type: "image",
+};
 
-export { cloudinary, storage };
+// Uploads an in-memory image buffer and resolves with Cloudinary's result.
+const uploadProfilePhoto = (buffer, userId) =>
+  new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { ...PROFILE_PHOTO_OPTIONS, public_id: `user_${userId}` },
+      (err, result) => (err ? reject(err) : resolve(result))
+    );
+    stream.end(buffer);
+  });
+
+export { cloudinary, uploadProfilePhoto };
