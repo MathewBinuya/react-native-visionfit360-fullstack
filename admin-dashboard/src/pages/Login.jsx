@@ -2,8 +2,9 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../lib/api";
 
-// Two-step sign-in: password, then a 6-digit code — from the admin inbox, the
-// authenticator app (if set up in Security), or a one-time backup code.
+// Two-step sign-in: password, then a 6-digit code. With an authenticator set up
+// (Security page), the admin chooses: authenticator app or email code — or a
+// one-time backup code. Without one, the email code is sent straight away.
 const METHOD_COPY = {
   email: { label: "Email code", hint: (to) => `Enter the 6-digit code sent to ${to}` },
   app: { label: "Authenticator code", hint: () => "Enter the 6-digit code from your authenticator app" },
@@ -11,13 +12,14 @@ const METHOD_COPY = {
 };
 
 export default function Login() {
-  const [step, setStep] = useState("password");
+  const [step, setStep] = useState("password"); // password | choose | code
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [challenge, setChallenge] = useState("");
   const [sentTo, setSentTo] = useState("");
   const [methods, setMethods] = useState({ email: true, app: false, backup: false });
+  const [canChoose, setCanChoose] = useState(false);
   const [method, setMethod] = useState("email");
   const [resendIn, setResendIn] = useState(0);
   const [error, setError] = useState("");
@@ -31,27 +33,12 @@ export default function Login() {
     return () => clearTimeout(t);
   }, [resendIn]);
 
-  const enterCodeStep = (data) => {
-    const m = data.methods || { email: true };
-    setChallenge(data.challenge);
-    setSentTo(data.email);
-    setMethods(m);
-    setResendIn(data.resendInSeconds ?? 60);
-    setCode("");
-    setStep("code");
-    if (!m.email && m.app) {
-      setMethod("app");
-      setInfo("The email code couldn't be sent. Use your authenticator app.");
-    } else {
-      setMethod("email");
-    }
-  };
+  const clearMessages = () => { setError(""); setInfo(""); };
 
-  const switchMethod = (m) => {
+  const openCode = (m) => {
     setMethod(m);
     setCode("");
-    setError("");
-    setInfo("");
+    setStep("code");
   };
 
   const backToPassword = (message = "") => {
@@ -62,14 +49,29 @@ export default function Login() {
     setError(message);
   };
 
+  const failed = (err, fallback) => {
+    const data = err.response?.data || {};
+    if (data.restart) return backToPassword(data.message);
+    if (data.resendInSeconds) setResendIn(data.resendInSeconds);
+    setError(data.message || fallback);
+  };
+
   const handleLogin = async (e) => {
     e.preventDefault();
-    setError("");
-    setInfo("");
+    clearMessages();
     setLoading(true);
     try {
-      const res = await api.post("/login", { email, password });
-      enterCodeStep(res.data);
+      const { data } = await api.post("/login", { email, password });
+      setChallenge(data.challenge);
+      setSentTo(data.email);
+      setMethods(data.methods || { email: true });
+      setCanChoose(!!data.choose);
+      if (data.choose) {
+        setStep("choose");
+      } else {
+        setResendIn(data.resendInSeconds ?? 60);
+        openCode("email");
+      }
     } catch (err) {
       setError(err.response?.data?.message || "Login failed");
     } finally {
@@ -77,10 +79,35 @@ export default function Login() {
     }
   };
 
+  // Choosing email sends the code now (or reuses one sent in the last minute).
+  const chooseEmail = async () => {
+    clearMessages();
+    setLoading(true);
+    try {
+      const { data } = await api.post("/login/resend", { challenge, first: true });
+      setResendIn(data.resendInSeconds ?? 60);
+      openCode("email");
+    } catch (err) {
+      failed(err, "Couldn't send the email code");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    clearMessages();
+    try {
+      const { data } = await api.post("/login/resend", { challenge });
+      setResendIn(data.resendInSeconds ?? 60);
+      setInfo("A new code was sent.");
+    } catch (err) {
+      failed(err, "Couldn't resend the code");
+    }
+  };
+
   const handleVerify = async (e) => {
     e.preventDefault();
-    setError("");
-    setInfo("");
+    clearMessages();
     setLoading(true);
     try {
       const res = await api.post("/login/verify", { challenge, code, method });
@@ -88,33 +115,48 @@ export default function Login() {
       localStorage.setItem("adminName", res.data.admin.name);
       navigate("/dashboard");
     } catch (err) {
-      const data = err.response?.data || {};
-      if (data.restart) backToPassword(data.message);
-      else setError(data.message || "Verification failed");
+      failed(err, "Verification failed");
     } finally {
       setLoading(false);
     }
   };
 
-  const handleResend = async () => {
-    setError("");
-    setInfo("");
-    try {
-      const res = await api.post("/login/resend", { challenge });
-      enterCodeStep(res.data);
-      setInfo("A new code was sent.");
-    } catch (err) {
-      const data = err.response?.data || {};
-      if (data.restart) return backToPassword(data.message);
-      if (data.resendInSeconds) setResendIn(data.resendInSeconds);
-      setError(data.message || "Couldn't resend the code");
-    }
-  };
+  if (step === "choose") {
+    return (
+      <div className="login-wrap">
+        <div className="login-card">
+          <h1>VisionFIT360</h1>
+          <p className="subtitle">How do you want to verify it's you?</p>
+
+          {error && <div className="error">{error}</div>}
+
+          <button type="button" className="choice-btn" onClick={() => { clearMessages(); openCode("app"); }} disabled={loading}>
+            <span className="choice-title">Authenticator app</span>
+            <span className="choice-sub">Use the 6-digit code from your app</span>
+          </button>
+          <button type="button" className="choice-btn" onClick={chooseEmail} disabled={loading}>
+            <span className="choice-title">{loading ? "Sending code..." : "Email code"}</span>
+            <span className="choice-sub">Send a code to {sentTo}</span>
+          </button>
+
+          <div className="login-links">
+            <button type="button" className="link-btn" onClick={() => backToPassword()}>
+              ← Back
+            </button>
+            {methods.backup && (
+              <button type="button" className="link-btn" onClick={() => { clearMessages(); openCode("backup"); }}>
+                Use a backup code
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (step === "code") {
     const isBackup = method === "backup";
     const ready = isBackup ? code.replace(/[^a-z0-9]/gi, "").length === 8 : code.length === 6;
-    const others = ["email", "app", "backup"].filter((m) => m !== method && (m === "email" || methods[m]));
 
     return (
       <div className="login-wrap">
@@ -156,11 +198,11 @@ export default function Login() {
             )}
           </div>
 
-          {others.map((m) => (
-            <button key={m} type="button" className="link-btn login-switch" onClick={() => switchMethod(m)}>
-              {m === "email" ? "Use the email code instead" : m === "app" ? "Use authenticator app instead" : "Use a backup code"}
+          {canChoose && (
+            <button type="button" className="link-btn login-switch" onClick={() => { clearMessages(); setCode(""); setStep("choose"); }}>
+              Try another way
             </button>
-          ))}
+          )}
 
           {method === "email" && <p className="login-hint">Code expires in 10 minutes. Check Spam if it doesn't arrive.</p>}
         </form>

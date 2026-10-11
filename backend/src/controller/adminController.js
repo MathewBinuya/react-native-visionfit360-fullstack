@@ -155,7 +155,14 @@ export const adminLogin = async (req, res) => {
     admin.otpChallengeId = crypto.randomBytes(16).toString("hex");
     admin.otpAttempts = 0;
 
-    // A still-valid code sent under a minute ago is reused instead of emailing again.
+    // With an authenticator set up, the admin picks the method on the next
+    // screen — no email is sent unless they choose it (POST /login/resend).
+    if (admin.totpEnabled) {
+      await admin.save();
+      return res.json({ ...otpStepResponse(admin, false), choose: true });
+    }
+
+    // Email only: a still-valid code sent under a minute ago is reused instead of emailing again.
     const recent = admin.otpHash && admin.otpExpiresAt > new Date() && Date.now() - admin.otpSentAt < OTP_RESEND_MS;
     const emailSent = recent || (await sendAdminOtp(admin));
 
@@ -230,13 +237,18 @@ export const verifyAdminOtp = async (req, res) => {
   }
 };
 
-// Resend the email code (once per minute) without re-entering the password.
+// Sends the email code — when the admin chooses email (`first: true`) or taps
+// Resend (once per minute) — without re-entering the password.
 export const resendAdminOtp = async (req, res) => {
   try {
     const admin = await loadPendingAdmin(req.body.challenge);
     if (!admin) return res.status(400).json({ message: "Your sign-in expired. Please sign in again.", restart: true });
 
     const wait = admin.otpSentAt ? admin.otpSentAt.getTime() + OTP_RESEND_MS - Date.now() : 0;
+    // Choosing email again within a minute reuses the code that's already on its way.
+    if (req.body.first && wait > 0 && admin.otpHash && admin.otpExpiresAt > new Date()) {
+      return res.json(otpStepResponse(admin, true));
+    }
     if (wait > 0) {
       return res.status(429).json({ message: `Please wait ${Math.ceil(wait / 1000)}s before resending.`, resendInSeconds: Math.ceil(wait / 1000) });
     }
