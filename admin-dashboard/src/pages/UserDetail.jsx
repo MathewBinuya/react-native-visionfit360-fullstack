@@ -47,7 +47,7 @@ export default function UserDetail() {
     <div className="layout">
       <Sidebar />
       <div className="main">
-        <button className="btn-small" style={{ marginBottom: 16 }} onClick={() => navigate("/users")}>
+        <button className="btn-ghost" style={{ marginBottom: 16 }} onClick={() => navigate("/users")}>
           ← Back to Users
         </button>
         <h1 className="page-title">User Account</h1>

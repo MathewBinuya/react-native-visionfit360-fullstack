@@ -25,7 +25,7 @@ export function LineChart({ data, height = 190 }) {
   const [ref, w] = useWidth();
   const [hover, setHover] = useState(null);
 
-  const padL = 34, padR = 12, padT = 12, padB = 24;
+  const padL = 34, padR = 24, padT = 12, padB = 24;
   const innerW = Math.max(w - padL - padR, 10);
   const innerH = height - padT - padB;
 
@@ -64,7 +64,7 @@ export function LineChart({ data, height = 190 }) {
               <text x={padL - 6} y={y(t) + 3} textAnchor="end" className="chart-tick">{t}</text>
             </g>
           ))}
-          {areaPath && <path d={areaPath} fill={ACCENT} fillOpacity="0.10" />}
+          {areaPath && <path d={areaPath} fill={ACCENT} fillOpacity="0.06" />}
           <path d={linePath} fill="none" stroke={ACCENT} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
           {hover != null && data[hover] && (
             <>

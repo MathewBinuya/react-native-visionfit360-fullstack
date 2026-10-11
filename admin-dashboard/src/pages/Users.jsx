@@ -103,11 +103,13 @@ export default function Users() {
                   const seen = lastSeen(u);
                   return (
                     <tr key={u._id} className="clickable" onClick={() => navigate(`/users/${u._id}`)}>
-                      <td className="user-cell">
-                        <Avatar user={u} />
-                        <div className="user-id">
-                          <span className="user-id-name">{displayName(u)}</span>
-                          <span className="user-id-handle">@{u.username}</span>
+                      <td>
+                        <div className="user-cell">
+                          <Avatar user={u} />
+                          <div className="user-id">
+                            <span className="user-id-name">{displayName(u)}</span>
+                            <span className="user-id-handle">@{u.username}</span>
+                          </div>
                         </div>
                       </td>
                       <td className="muted">{u.email}</td>
@@ -115,7 +117,7 @@ export default function Users() {
                       <td className="muted">{seen ? relativeTime(seen) : "Never"}</td>
                       <td>
                         <button
-                          className="btn-small"
+                          className="btn-ghost"
                           onClick={(e) => { e.stopPropagation(); navigate(`/users/${u._id}`); }}
                         >
                           View

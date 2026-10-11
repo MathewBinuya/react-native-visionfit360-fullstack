@@ -156,7 +156,7 @@ export default function UsersPerExercise() {
             title={exerciseLabel(selected)}
             subtitle={detail ? `${detail.total} ${detail.total === 1 ? "user" : "users"}` : "Loading…"}
             actions={
-              <button className="btn-small" onClick={closeDetail}>← All exercises</button>
+              <button className="btn-ghost" onClick={closeDetail}>← All exercises</button>
             }
           >
             <div className="toolbar">
@@ -182,7 +182,7 @@ export default function UsersPerExercise() {
                   <tbody>
                     {detail?.users.map((u) => (
                       <tr key={u.userId} className="clickable" onClick={() => navigate(`/users/${u.userId}`)}>
-                        <td className="user-cell"><Avatar user={u} /> {displayName(u)}</td>
+                        <td><span className="user-cell"><Avatar user={u} /> {displayName(u)}</span></td>
                         <td className="muted">{u.email || "—"}</td>
                         <td>{u.sessions}</td>
                         <td className="muted">{relativeTime(u.lastUsed)}</td>
@@ -193,11 +193,11 @@ export default function UsersPerExercise() {
 
                 {detail && detail.total > PAGE_SIZE && (
                   <div className="pager">
-                    <button className="btn-small" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+                    <button className="btn-ghost" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
                       Previous
                     </button>
                     <span className="pager-info">Page {page} of {totalPages}</span>
-                    <button className="btn-small" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+                    <button className="btn-ghost" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
                       Next
                     </button>
                   </div>
