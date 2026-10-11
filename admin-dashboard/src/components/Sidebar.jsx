@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { NavLink, useNavigate } from "react-router-dom";
 
 export default function Sidebar() {
@@ -28,7 +29,9 @@ export default function Sidebar() {
       <NavLink to="/security" className={({ isActive }) => isActive ? "active" : ""}>Security</NavLink>
       <button className="logout" onClick={() => setConfirming(true)}>Log out ({adminName})</button>
 
-      {confirming && (
+      {/* portal: the sticky sidebar is its own stacking context, so the dialog
+          must render at <body> level to sit above the page content */}
+      {confirming && createPortal(
         <div className="dialog-backdrop" onClick={() => setConfirming(false)}>
           <div
             className="dialog"
@@ -44,7 +47,8 @@ export default function Sidebar() {
               <button className="btn-small" onClick={logout}>Log out</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
