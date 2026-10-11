@@ -6,7 +6,8 @@ import { LineChart, BarChart } from "../components/Charts";
 import api from "../lib/api";
 import { exerciseLabel, relativeTime, displayName } from "../lib/format";
 
-const PRESENCE_POLL_MS = 20000; // how often the dashboard refreshes presence
+const PRESENCE_POLL_MS = 20000;  // how often the dashboard refreshes presence
+const DASHBOARD_POLL_MS = 60000; // how often the rest of the numbers refresh
 const EXERCISE_PREVIEW = 8;     // top-N exercises shown on the dashboard (full list lives on its own page)
 const PEOPLE_PREVIEW = 8;
 
@@ -79,6 +80,15 @@ export default function Dashboard() {
 
   useEffect(() => { loadDashboard(range); }, [range, loadDashboard]);
 
+  // keep the numbers current while the tab is open; skip while it's hidden and
+  // catch up as soon as the admin comes back to it
+  useEffect(() => {
+    const tick = () => { if (document.visibilityState === "visible") loadDashboard(range); };
+    const id = setInterval(tick, DASHBOARD_POLL_MS);
+    document.addEventListener("visibilitychange", tick);
+    return () => { clearInterval(id); document.removeEventListener("visibilitychange", tick); };
+  }, [range, loadDashboard]);
+
   useEffect(() => {
     loadPresence();
     const id = setInterval(loadPresence, PRESENCE_POLL_MS);
@@ -129,7 +139,7 @@ export default function Dashboard() {
             <Kpi label="Total users" value={k?.totalUsers} hint={`+${k?.newUsers ?? 0} in ${range} days`} />
             <Kpi label={`Active · ${k?.accountActiveDays ?? 7} days`} value={k?.activeAccounts} hint={`${k?.inactiveAccounts ?? 0} inactive`} />
             <Kpi label="Active now" value={counts?.active} hint="seen in last 2 min" />
-            <Kpi label={`Sessions · ${range} days`} value={k?.sessionsInRange} hint={`${k?.totalSessions ?? 0} all time`} />
+            <Kpi label={`Sessions · ${range} days`} value={k?.sessionsInRange} hint={`completed · ${k?.totalSessions ?? 0} all time`} />
             <Kpi
               label="Form quality"
               value={repTotal ? `${Math.round((rep.good / repTotal) * 100)}%` : null}
@@ -145,7 +155,7 @@ export default function Dashboard() {
                 <LineChart data={data?.analytics?.newUsersTrend || []} />
               </StateBlock>
             </Panel>
-            <Panel title="Workout sessions" meta={`last ${range} days`}>
+            <Panel title="Completed sessions" meta={`last ${range} days`}>
               <StateBlock empty={!data?.workouts?.usageTrend?.length} emptyText="No sessions in this range.">
                 <LineChart data={data?.workouts?.usageTrend || []} />
               </StateBlock>

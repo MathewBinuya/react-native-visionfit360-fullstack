@@ -3,6 +3,7 @@ import crypto from "crypto";
 import Admin from "../models/admin.model.js";
 import { sendEmail } from "../lib/email.js";
 import { ADMIN_EMAIL, isAllowedAdmin } from "../lib/adminAccess.js";
+import { EXERCISE_CATALOG, canonicalExerciseName } from "../lib/exerciseCatalog.js";
 import {
   generateTotpSecret, verifyTotp, otpauthUrl, encryptSecret, decryptSecret,
   generateBackupCodes, hashBackupCode,
@@ -29,22 +30,77 @@ const SAFE_USER_FIELDS =
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// Shared pipeline: distinct users + session counts per exercise (from workout records).
-// Reused by the dashboard summary and the dedicated "Users per Exercise" page.
-const exerciseUsagePipeline = (limit = 50) => [
-  { $unwind: "$exercises" },
-  { $match: { "exercises.name": { $nin: [null, ""] } } },
-  {
-    $group: {
-      _id: { $toLower: "$exercises.name" },
-      users: { $addToSet: "$user" },
-      sessions: { $sum: 1 },
+// A "session" is a workout the user actually finished — planned workouts still
+// sitting in the tracker are not counted. It's dated by when it was completed.
+const TZ = "Asia/Manila";
+const MANILA_OFFSET_MS = 8 * 60 * 60 * 1000;
+const SESSION_MATCH = { completed: true };
+const SESSION_DATE = { $ifNull: ["$completedAt", "$date"] };
+
+// Start of the Manila calendar day `daysAgo` days before today.
+const manilaDayStart = (now, daysAgo) => {
+  const day = Math.floor((now.getTime() + MANILA_OFFSET_MS) / DAY_MS) - daysAgo;
+  return new Date(day * DAY_MS - MANILA_OFFSET_MS);
+};
+const manilaDate = (t) => new Date(t + MANILA_OFFSET_MS).toISOString().slice(0, 10);
+
+// One point per day (oldest -> today), so quiet days show as 0 instead of being skipped.
+const fillDays = (rows, start, now) => {
+  const counts = new Map(rows.map((r) => [r._id, r.count]));
+  const out = [];
+  for (let t = start.getTime(); t <= now.getTime(); t += DAY_MS) {
+    const date = manilaDate(t);
+    out.push({ date, count: counts.get(date) || 0 });
+  }
+  return out;
+};
+
+// Same exercise under different spellings (RepVision saves "bicepcurl", the
+// tracker "Bicep Curls") is merged via the catalog; other names group by their
+// letters/digits only ("Push-Ups" = "push ups"). Catalog exercises report the AR
+// key, which the dashboard already labels.
+const exerciseGroup = (name) => {
+  const canonical = canonicalExerciseName(name);
+  const entry = canonical && EXERCISE_CATALOG.find((e) => e.name === canonical);
+  return entry ? entry.key : String(name || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+};
+
+// Distinct users + completed sessions per exercise. Shared by the dashboard
+// summary and the "Users per Exercise" page.
+// Records left behind by deleted accounts are ignored everywhere on the dashboard.
+const ownedBy = (userIds) => ({ user: { $in: userIds } });
+
+const loadExerciseUsage = async (limit = 50, userIds) => {
+  const rows = await Workout.aggregate([
+    { $match: { ...SESSION_MATCH, ...ownedBy(userIds) } },
+    { $unwind: "$exercises" },
+    { $match: { "exercises.name": { $nin: [null, ""] } } },
+    {
+      $group: {
+        _id: { $toLower: { $trim: { input: "$exercises.name" } } },
+        users: { $addToSet: "$user" },
+        sessions: { $sum: 1 },
+      },
     },
-  },
-  { $project: { _id: 0, exercise: "$_id", userCount: { $size: "$users" }, sessions: 1 } },
-  { $sort: { userCount: -1, sessions: -1 } },
-  { $limit: limit },
-];
+  ]);
+
+  const merged = new Map();
+  for (const r of rows) {
+    const key = exerciseGroup(r._id);
+    if (!key) continue;
+    const isCatalog = EXERCISE_CATALOG.some((e) => e.key === key);
+    const g = merged.get(key) || { exercise: isCatalog ? key : r._id, users: new Set(), sessions: 0, top: 0 };
+    r.users.forEach((u) => g.users.add(String(u)));
+    g.sessions += r.sessions;
+    if (!isCatalog && r.sessions > g.top) { g.exercise = r._id; g.top = r.sessions; } // most-used spelling
+    merged.set(key, g);
+  }
+
+  return [...merged.values()]
+    .map((g) => ({ exercise: g.exercise, userCount: g.users.size, sessions: g.sessions }))
+    .sort((a, b) => b.userCount - a.userCount || b.sessions - a.sessions)
+    .slice(0, limit);
+};
 
 //  AUTH 
 // Two-step login: password, then ONE of — the 6-digit code emailed to
@@ -411,7 +467,12 @@ export const deleteUser = async (req, res) => {
   try {
     const user = await User.findByIdAndDelete(req.params.id);
     if (!user) return res.status(404).json({ message: "User not found" });
-    await Workout.deleteMany({ user: req.params.id });   // clean up their workouts too
+    // remove everything tied to the account so it doesn't linger in the dashboard
+    await Promise.all([
+      Workout.deleteMany({ user: req.params.id }),
+      Feedback.deleteMany({ user: req.params.id }),
+      LoginEvent.deleteMany({ user: req.params.id }),
+    ]);
     res.json({ message: "User deleted" });
   } catch (error) {
     res.status(500).json({ message: "Server error" });
@@ -462,7 +523,16 @@ export const getDashboard = async (req, res) => {
   try {
     const range = [7, 30].includes(Number(req.query.range)) ? Number(req.query.range) : 7;
     const now = new Date();
-    const rangeStart = new Date(now.getTime() - range * DAY_MS);
+    // "Last N days" = today plus the previous N-1 calendar days in Manila, so the
+    // KPI numbers and the daily charts cover exactly the same days.
+    const rangeStart = manilaDayStart(now, range - 1);
+    const liveUsers = await User.distinct("_id");
+    const owned = ownedBy(liveUsers);
+    const sessionsSince = (start) => ({
+      ...SESSION_MATCH,
+      ...owned,
+      $or: [{ completedAt: { $gte: start } }, { completedAt: null, date: { $gte: start } }],
+    });
     const recentlyActiveThreshold = new Date(now.getTime() - RECENTLY_ACTIVE_WINDOW_MS);
     const accountActiveThreshold = new Date(now.getTime() - ACCOUNT_ACTIVE_DAYS * DAY_MS);
 
@@ -495,8 +565,8 @@ export const getDashboard = async (req, res) => {
           { lastLoginAt: { $gte: accountActiveThreshold } },
         ],
       }),
-      Workout.countDocuments(),
-      Workout.countDocuments({ createdAt: { $gte: rangeStart } }),
+      Workout.countDocuments({ ...SESSION_MATCH, ...owned }),
+      Workout.countDocuments(sessionsSince(rangeStart)),
 
       // --- demographics: one pass over users, several facets ---
       User.aggregate([
@@ -555,10 +625,11 @@ export const getDashboard = async (req, res) => {
       ]),
 
       // --- users per exercise + sessions per exercise ---
-      Workout.aggregate(exerciseUsagePipeline(50)),
+      loadExerciseUsage(50, liveUsers),
 
       // --- good vs bad rep totals (only AR sets carry these) ---
       Workout.aggregate([
+        { $match: { ...SESSION_MATCH, ...owned } },
         { $unwind: "$exercises" },
         { $unwind: "$exercises.sets" },
         {
@@ -570,32 +641,33 @@ export const getDashboard = async (req, res) => {
         },
       ]),
 
-      // --- workout usage trend (per day, within range) ---
+      // --- completed sessions per Manila day, within range ---
       Workout.aggregate([
-        { $match: { createdAt: { $gte: rangeStart } } },
+        { $match: { ...SESSION_MATCH, ...owned } },
+        { $addFields: { at: SESSION_DATE } },
+        { $match: { at: { $gte: rangeStart } } },
         {
           $group: {
-            _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+            _id: { $dateToString: { format: "%Y-%m-%d", date: "$at", timezone: TZ } },
             count: { $sum: 1 },
           },
         },
-        { $sort: { _id: 1 } },
       ]),
 
-      // --- new users trend (per day, within range) ---
+      // --- sign-ups per Manila day, within range ---
       User.aggregate([
         { $match: { createdAt: { $gte: rangeStart } } },
         {
           $group: {
-            _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+            _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: TZ } },
             count: { $sum: 1 },
           },
         },
-        { $sort: { _id: 1 } },
       ]),
 
       // --- feedback summary + rating distribution ---
       Feedback.aggregate([
+        { $match: owned },
         {
           $facet: {
             summary: [{ $group: { _id: null, avg: { $avg: "$rating" }, count: { $sum: 1 } } }],
@@ -607,8 +679,8 @@ export const getDashboard = async (req, res) => {
         },
       ]),
 
-      Feedback.find().sort({ createdAt: -1 }).limit(20).populate("user", "name username photo"),
-      LoginEvent.find().sort({ createdAt: -1 }).limit(20).populate("user", "name username photo"),
+      Feedback.find(owned).sort({ createdAt: -1 }).limit(20).populate("user", "name username photo"),
+      LoginEvent.find(owned).sort({ createdAt: -1 }).limit(20).populate("user", "name username photo"),
       User.find().sort({ createdAt: -1 }).limit(10).select("name username email gender createdAt"),
     ]);
 
@@ -640,10 +712,10 @@ export const getDashboard = async (req, res) => {
       workouts: {
         exerciseUsage, // [{ exercise, userCount, sessions }]
         repQuality,    // { good, bad }  (ratio only meaningful when good+bad > 0)
-        usageTrend: workoutTrend.map((d) => ({ date: d._id, count: d.count })),
+        usageTrend: fillDays(workoutTrend, rangeStart, now),
       },
       analytics: {
-        newUsersTrend: newUserTrend.map((d) => ({ date: d._id, count: d.count })),
+        newUsersTrend: fillDays(newUserTrend, rangeStart, now),
       },
       feedback: {
         avgRating: fbSummary.avg ? +fbSummary.avg.toFixed(2) : 0,
@@ -724,7 +796,7 @@ export const getPresence = async (req, res) => {
 //  Card data: every exercise people have actually done, with distinct-user + session counts.
 export const getExerciseUsage = async (req, res) => {
   try {
-    const usage = await Workout.aggregate(exerciseUsagePipeline(100));
+    const usage = await loadExerciseUsage(100, await User.distinct("_id"));
     res.json(usage);
   } catch (error) {
     console.log("getExerciseUsage error:", error);
@@ -736,6 +808,11 @@ export const getExerciseUsage = async (req, res) => {
 export const getUsersByExercise = async (req, res) => {
   try {
     const exercise = String(req.params.exercise || "").toLowerCase();
+    // every stored spelling that belongs to this exercise (e.g. "bicepcurl" + "bicep curls")
+    const group = exerciseGroup(exercise);
+    const spellings = (await Workout.distinct("exercises.name", SESSION_MATCH))
+      .map((n) => String(n).trim().toLowerCase())
+      .filter((n) => n && exerciseGroup(n) === group);
     const search = String(req.query.search || "").trim();
     const page = Math.max(1, Number(req.query.page) || 1);
     const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
@@ -743,10 +820,11 @@ export const getUsersByExercise = async (req, res) => {
     const re = new RegExp(escaped, "i");
 
     const result = await Workout.aggregate([
+      { $match: SESSION_MATCH },
       { $unwind: "$exercises" },
-      { $addFields: { exLower: { $toLower: "$exercises.name" } } },
-      { $match: { exLower: exercise } },
-      { $group: { _id: "$user", sessions: { $sum: 1 }, lastUsed: { $max: "$createdAt" } } },
+      { $addFields: { exLower: { $toLower: { $trim: { input: "$exercises.name" } } } } },
+      { $match: { exLower: { $in: spellings } } },
+      { $group: { _id: "$user", sessions: { $sum: 1 }, lastUsed: { $max: SESSION_DATE } } },
       { $lookup: { from: "users", localField: "_id", foreignField: "_id", as: "user" } },
       { $unwind: "$user" },
       ...(search
