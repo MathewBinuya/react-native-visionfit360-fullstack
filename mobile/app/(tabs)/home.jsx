@@ -6,16 +6,22 @@ import COLORS from "../../constants/colors"
 import styles from '../../assets/styles/tabStyle/home.style'
 import api from '../../lib/axios'
 import { useAuthStore } from '../../store/authStore'
+import { refreshProgressNotifications } from '../../lib/notifications'
+import { formatPct } from '../../lib/progress'
+import ActivityCard from '../../components/ActivityCard'
 
 export default function Home() {
   const user = useAuthStore((s) => s.user);
   const [workouts, setWorkouts] = useState([]);
+  const [summary, setSummary] = useState(null);
+  const [calendar, setCalendar] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
   // reload completed workouts every time home comes into focus
   useFocusEffect(
     useCallback(() => {
       loadWorkouts();
+      loadAnalytics();
     }, [])
   );
 
@@ -28,31 +34,29 @@ export default function Home() {
     }
   };
 
+  // totals + this week come from the analytics endpoint (covers ALL completed
+  // workouts, not just the first page), and keep the 8 AM / 8 PM reminders current
+  const loadAnalytics = async () => {
+    try {
+      const res = await api.get("/workouts/analytics");
+      setSummary(res.data.summary);
+      setCalendar(res.data.calendar || null);
+      refreshProgressNotifications(res.data);
+    } catch (error) {
+      console.log("Failed to load analytics", error.message);
+    }
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadWorkouts();
+    await Promise.all([loadWorkouts(), loadAnalytics()]);
     setRefreshing(false);
   };
 
-  //   derived stats 
-  const workoutsDone = workouts.length;
-
-  const volumeThisWeek = () => {
-    const oneWeekAgo = new Date();
-    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-    let total = 0;
-    workouts.forEach((w) => {
-      const when = new Date(w.completedAt || w.date);
-      if (when >= oneWeekAgo) {
-        w.exercises?.forEach((ex) =>
-          ex.sets?.forEach((s) => {
-            total += (s.reps || 0) * (s.weightKg || 0);
-          })
-        );
-      }
-    });
-    return total;
-  };
+  //   derived stats
+  const workoutsDone = summary ? summary.totalWorkouts : workouts.length;
+  const volumeThisWeek = summary?.thisWeek.volume ?? 0;
+  const volumeChange = formatPct(summary?.volumeChangePct);
 
   // BMI from stored height/weight
   const bmiData = () => {
@@ -120,18 +124,37 @@ export default function Home() {
       >
         {/* stats strip */}
         <View style={styles.statsRow}>
-          <View style={styles.statCard}>
+          <TouchableOpacity style={styles.statCard} onPress={() => router.push("/progress")} activeOpacity={0.7}>
             <Text style={styles.statLabel}>Workouts done</Text>
             <Text style={styles.statValue}>{workoutsDone}</Text>
-          </View>
-          <View style={styles.statCard}>
+            {summary && (
+              <Text style={styles.statSub}>
+                {summary.thisWeek.workouts} this week
+                {summary.weekStreak >= 2 ? ` · ${summary.weekStreak}-wk streak` : ""}
+              </Text>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.statCard} onPress={() => router.push("/progress")} activeOpacity={0.7}>
             <Text style={styles.statLabel}>Volume this week</Text>
             <Text style={styles.statValue}>
-              {volumeThisWeek().toLocaleString()}
+              {volumeThisWeek.toLocaleString()}
               <Text style={styles.statUnit}> kg</Text>
             </Text>
-          </View>
+            {summary && (
+              <Text style={styles.statSub}>
+                {volumeChange ? `${volumeChange} vs last week` : "vs last week: —"}
+              </Text>
+            )}
+          </TouchableOpacity>
         </View>
+        <TouchableOpacity style={styles.progressLink} onPress={() => router.push("/progress")}>
+          <Ionicons name="stats-chart-outline" size={16} color={COLORS.black} />
+          <Text style={styles.progressLinkText}>View progress</Text>
+          <Ionicons name="chevron-forward" size={16} color={COLORS.placeholderText} />
+        </TouchableOpacity>
+
+        {/* activity grid + streak (completed workouts per day) */}
+        <ActivityCard calendar={calendar} style={{ marginBottom: 14 }} />
 
         {/* BMI card */}
         {bmi && (

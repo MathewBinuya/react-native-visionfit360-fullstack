@@ -28,6 +28,7 @@ export default function RootLayout() {
           <Stack.Screen name="posetracker" />
           <Stack.Screen name="repvision-guide" />
           <Stack.Screen name="feedback" />
+          <Stack.Screen name="progress" />
 
           
         </Stack>

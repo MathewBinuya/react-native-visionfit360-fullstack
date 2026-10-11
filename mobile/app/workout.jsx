@@ -1,6 +1,7 @@
-import { View, Text, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform, BackHandler } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, Keyboard, Platform, BackHandler } from 'react-native'
 import { showAlert } from '../components/AppAlert'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { refreshProgressNotifications } from '../lib/notifications'
 import { router } from 'expo-router'
 import { Ionicons } from "@expo/vector-icons"
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -60,6 +61,49 @@ export default function Workout() {
   const [editTitle, setEditTitle] = useState('');
   const [editExercises, setEditExercises] = useState([]);
   const [editSaving, setEditSaving] = useState(false);
+
+  //  KEYBOARD HANDLING (Add/Edit overlays)
+  // The overlays are plain Views (not Modal) and Android runs edge-to-edge, so the
+  // window doesn't shrink for the keyboard. We pad the overlay by however much the
+  // keyboard actually covers it, then scroll the focused input into view.
+  const [keyboardInset, setKeyboardInset] = useState(0);
+  const overlayRef = useRef(null);
+  const formScrollRef = useRef(null);
+  const formContentRef = useRef(null);
+  const formViewport = useRef({ y: 0, h: 0 });
+
+  const revealFocusedInput = () => {
+    const input = TextInput.State.currentlyFocusedInput?.();
+    const content = formContentRef.current;
+    const scroll = formScrollRef.current;
+    if (!input || !content || !scroll) return;
+    input.measureLayout(content, (_x, y, _w, h) => {
+      const { y: top, h: viewH } = formViewport.current;
+      const pad = 24;
+      if (y - pad < top) scroll.scrollTo({ y: Math.max(0, y - pad), animated: true });
+      else if (y + h + pad > top + viewH) scroll.scrollTo({ y: y + h + pad - viewH, animated: true });
+    }, () => {});
+  };
+
+  const onInputFocus = () => setTimeout(revealFocusedInput, 120);
+
+  useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvt, (e) => {
+      const { height, screenY } = e.endCoordinates;
+      const overlay = overlayRef.current;
+      if (!overlay) { setKeyboardInset(height); return; }
+      overlay.measureInWindow((_x, y, _w, h) => {
+        // overlap = 0 if the OS already resized the window above the keyboard
+        const overlap = h > 0 && screenY > 0 ? y + h - screenY : height;
+        setKeyboardInset(Math.max(0, overlap));
+        setTimeout(revealFocusedInput, 120);
+      });
+    });
+    const hideSub = Keyboard.addListener(hideEvt, () => setKeyboardInset(0));
+    return () => { showSub.remove(); hideSub.remove(); };
+  }, []);
 
   useEffect(() => { loadWorkouts(); }, []);
 
@@ -229,6 +273,7 @@ export default function Workout() {
     try {
       await api.patch(`/workouts/${id}/complete`);
       setWorkouts(prev => prev.filter(w => w._id !== id));
+      refreshProgressNotifications();
     } catch (error) {
       showAlert("Error", error.response?.data?.message || "Failed to complete workout");
     }
@@ -305,9 +350,14 @@ export default function Workout() {
           <Ionicons name="arrow-back" size={24} color={COLORS.black} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Workouts</Text>
-        <TouchableOpacity onPress={openAddModal}>
-          <Ionicons name="add" size={28} color={COLORS.black} />
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+          <TouchableOpacity onPress={() => router.push('/progress')} hitSlop={8} accessibilityLabel="View progress">
+            <Ionicons name="stats-chart-outline" size={22} color={COLORS.black} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={openAddModal}>
+            <Ionicons name="add" size={28} color={COLORS.black} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* WORKOUT LIST */}
@@ -428,18 +478,16 @@ export default function Workout() {
 
       {/*  EDIT WORKOUT OVERLAY  */}
       {showEdit && (
-      <View style={{
+      <View ref={overlayRef} style={{
         position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
         zIndex: 60, elevation: 60,
       }}>
         <View style={{
           flex: 1, backgroundColor: 'rgba(0,0,0,0.4)',
           justifyContent: 'center', alignItems: 'center', padding: 20,
+          paddingBottom: 20 + keyboardInset,
         }}>
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={{ width: '100%', maxWidth: 480, maxHeight: '85%' }}
-          >
+          <View style={{ width: '100%', maxWidth: 480, maxHeight: '85%' }}>
             <View style={{
               backgroundColor: COLORS.white,
               borderRadius: 20,
@@ -462,9 +510,14 @@ export default function Workout() {
               </View>
 
               <ScrollView
+                ref={formScrollRef}
                 contentContainerStyle={{ padding: 20 }}
                 keyboardShouldPersistTaps="handled"
+                onLayout={(e) => { formViewport.current.h = e.nativeEvent.layout.height; }}
+                onScroll={(e) => { formViewport.current.y = e.nativeEvent.contentOffset.y; }}
+                scrollEventThrottle={32}
               >
+              <View ref={formContentRef} collapsable={false}>
                 {/* title */}
                 <Text style={{ fontSize: 13, fontWeight: '600', color: COLORS.gray, marginBottom: 6 }}>
                   WORKOUT TITLE
@@ -479,6 +532,7 @@ export default function Workout() {
                   onChangeText={setEditTitle}
                   placeholder="e.g. Upper Body Day"
                   placeholderTextColor={COLORS.placeholderText}
+                  onFocus={onInputFocus}
                 />
 
                 {/* exercises */}
@@ -498,6 +552,7 @@ export default function Workout() {
                         onChangeText={(t) => updateExerciseName(exIdx, t)}
                         placeholder="Exercise name"
                         placeholderTextColor={COLORS.placeholderText}
+                        onFocus={onInputFocus}
                       />
                       <TouchableOpacity onPress={() => removeExercise(exIdx)} hitSlop={8}>
                         <Ionicons name="close-circle" size={22} color="#E24B4A" />
@@ -522,6 +577,7 @@ export default function Workout() {
                           onChangeText={(t) => updateSet(exIdx, setIdx, 'reps', t)}
                           placeholder="Reps"
                           placeholderTextColor={COLORS.placeholderText}
+                          onFocus={onInputFocus}
                           keyboardType="numeric"
                           maxLength={3}
                         />
@@ -535,6 +591,7 @@ export default function Workout() {
                           onChangeText={(t) => updateSet(exIdx, setIdx, 'weightKg', t)}
                           placeholder="kg"
                           placeholderTextColor={COLORS.placeholderText}
+                          onFocus={onInputFocus}
                           keyboardType="numeric"
                           maxLength={4}
                         />
@@ -586,27 +643,26 @@ export default function Workout() {
                     {editSaving ? 'Saving...' : 'Save changes'}
                   </Text>
                 </TouchableOpacity>
+              </View>
               </ScrollView>
             </View>
-          </KeyboardAvoidingView>
+          </View>
         </View>
       </View>
       )}
 
       {/*  ADD WORKOUT OVERLAY   */}
       {showAdd && (
-      <View style={{
+      <View ref={overlayRef} style={{
         position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
         zIndex: 70, elevation: 70,
       }}>
         <View style={{
           flex: 1, backgroundColor: 'rgba(0,0,0,0.4)',
           justifyContent: 'center', alignItems: 'center', padding: 20,
+          paddingBottom: 20 + keyboardInset,
         }}>
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={{ width: '100%', maxWidth: 480, maxHeight: '85%' }}
-          >
+          <View style={{ width: '100%', maxWidth: 480, maxHeight: '85%' }}>
             <View style={{
               backgroundColor: COLORS.white,
               borderRadius: 20,
@@ -627,14 +683,20 @@ export default function Workout() {
               </View>
 
               <ScrollView
+                ref={formScrollRef}
                 contentContainerStyle={{ padding: 20 }}
                 keyboardShouldPersistTaps="handled"
+                onLayout={(e) => { formViewport.current.h = e.nativeEvent.layout.height; }}
+                onScroll={(e) => { formViewport.current.y = e.nativeEvent.contentOffset.y; }}
+                scrollEventThrottle={32}
               >
+              <View ref={formContentRef} collapsable={false}>
                 <Text style={styles.inputLabel}>Routine Name</Text>
                 <TextInput
                   style={[styles.input, { marginBottom: 20 }]}
                   placeholder="e.g Upper Body Day"
                   placeholderTextColor={COLORS.placeholderText}
+                  onFocus={onInputFocus}
                   value={newTitle}
                   onChangeText={setNewTitle}
                 />
@@ -656,6 +718,7 @@ export default function Workout() {
                         onChangeText={(t) => updateNewExerciseName(exIdx, t)}
                         placeholder="Exercise name"
                         placeholderTextColor={COLORS.placeholderText}
+                        onFocus={onInputFocus}
                       />
                       <TouchableOpacity onPress={() => removeNewExercise(exIdx)} hitSlop={8}>
                         <Ionicons name="close-circle" size={22} color="#E24B4A" />
@@ -680,6 +743,7 @@ export default function Workout() {
                           onChangeText={(t) => updateNewSet(exIdx, setIdx, 'reps', t)}
                           placeholder="Reps"
                           placeholderTextColor={COLORS.placeholderText}
+                          onFocus={onInputFocus}
                           keyboardType="numeric"
                           maxLength={3}
                         />
@@ -693,6 +757,7 @@ export default function Workout() {
                           onChangeText={(t) => updateNewSet(exIdx, setIdx, 'weightKg', t)}
                           placeholder="kg"
                           placeholderTextColor={COLORS.placeholderText}
+                          onFocus={onInputFocus}
                           keyboardType="numeric"
                           maxLength={4}
                         />
@@ -738,9 +803,10 @@ export default function Workout() {
                 >
                   <Text style={styles.saveText}>{saving ? 'Saving...' : 'Save Workout'}</Text>
                 </TouchableOpacity>
+              </View>
               </ScrollView>
             </View>
-          </KeyboardAvoidingView>
+          </View>
         </View>
       </View>
       )}

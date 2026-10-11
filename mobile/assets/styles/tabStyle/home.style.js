@@ -25,7 +25,14 @@ const styles = StyleSheet.create({
   },
   avatarText: { color: COLORS.white, fontSize: 16, fontWeight: "600", fontFamily: "GeneralSans-Variable" },
 
-  statsRow: { flexDirection: "row", gap: 10, marginBottom: 14 },
+  statsRow: { flexDirection: "row", gap: 10, marginBottom: 8 },
+  statSub: { fontSize: 11, color: COLORS.placeholderText, marginTop: 2, fontFamily: "GeneralSans-Variable" },
+  progressLink: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingVertical: 10, paddingHorizontal: 12, marginBottom: 14,
+    borderRadius: 12, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.cards,
+  },
+  progressLinkText: { flex: 1, fontSize: 13, fontWeight: "600", color: COLORS.black, fontFamily: "GeneralSans-Variable" },
   statCard: {
     flex: 1,
     backgroundColor: COLORS.cards,

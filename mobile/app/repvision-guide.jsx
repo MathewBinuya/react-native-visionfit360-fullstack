@@ -201,14 +201,6 @@ export default function RepVisionGuide() {
             {openedFromAr ? "Back to RepVision" : "Start RepVision"}
           </Text>
         </TouchableOpacity>
-
-        {/* Attribution for the optional spine-posture model (CC-BY-NC-4.0). Required when the model is
-            enabled; the experimental deadlift spine check is OFF by default and in commercial builds.
-            NOTE: there is no dedicated About screen yet — move this there if/when one is added. */}
-        <Text style={styles.creditText}>
-          Experimental deadlift back-posture check uses “SpinePose” keypoint weights © their authors,
-          licensed CC-BY-NC-4.0 (non-commercial, attribution). Disabled by default.
-        </Text>
       </ScrollView>
     </View>
   );

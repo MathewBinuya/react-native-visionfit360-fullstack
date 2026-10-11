@@ -8,22 +8,22 @@ import COLORS from "../constants/colors"
 import styles from '../assets/styles/notifications.style'
 import {
   requestPermission,
-  scheduleDailyNotifications,
+  scheduleProgressNotifications,
   cancelAllNotifications,
   sendTestNotification,
+  NOTIF_SETTINGS_KEY,
+  MORNING,
+  EVENING,
+  TIMEZONE,
 } from '../lib/notifications'
 
 export default function NotificationsScreen() {
   const [enabled, setEnabled] = useState(false);
 
-  // fixed default reminder times (8 AM and 8 PM) — set by the app, not the user
-  const MORNING = { hour: 8, minute: 0 };
-  const EVENING = { hour: 20, minute: 0 };
-
   // load saved setting
   useEffect(() => {
     (async () => {
-      const saved = await AsyncStorage.getItem("notifSettings");
+      const saved = await AsyncStorage.getItem(NOTIF_SETTINGS_KEY);
       if (saved) {
         const s = JSON.parse(saved);
         setEnabled(s.enabled);
@@ -31,11 +31,13 @@ export default function NotificationsScreen() {
     })();
   }, []);
 
+  // reminder times are fixed by the app (8 AM / 8 PM Manila), not the user
   const persist = async (isEnabled) => {
-    await AsyncStorage.setItem("notifSettings", JSON.stringify({
+    await AsyncStorage.setItem(NOTIF_SETTINGS_KEY, JSON.stringify({
       enabled: isEnabled,
       morningHour: MORNING.hour, morningMinute: MORNING.minute,
       eveningHour: EVENING.hour, eveningMinute: EVENING.minute,
+      timezone: TIMEZONE,
     }));
   };
 
@@ -47,8 +49,8 @@ export default function NotificationsScreen() {
         return;
       }
       setEnabled(true);
-      await scheduleDailyNotifications(MORNING.hour, MORNING.minute, EVENING.hour, EVENING.minute);
       await persist(true);
+      await scheduleProgressNotifications();
     } else {
       setEnabled(false);
       await cancelAllNotifications();
@@ -71,7 +73,7 @@ export default function NotificationsScreen() {
         <View style={styles.row}>
           <View>
             <Text style={styles.rowTitle}>Daily reminders</Text>
-            <Text style={styles.rowSub}>Workout reminder & motivation</Text>
+            <Text style={styles.rowSub}>8 AM & 8 PM (Manila) · based on your progress</Text>
           </View>
           <Switch
             value={enabled}

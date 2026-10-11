@@ -11,6 +11,7 @@ import COLORS from "../constants/colors"
 import styles from '../assets/styles/posetracker.style'
 import api from '../lib/axios'
 import { sendHeartbeat } from '../lib/heartbeat'
+import { refreshProgressNotifications } from '../lib/notifications'
 import { useAuthStore } from '../store/authStore'
 import { useAlert } from '../components/AppAlert'
 
@@ -138,6 +139,7 @@ export default function PoseTracker() {
         completedAt: new Date(),
       });
       sendHeartbeat(); // workout finish -> mark user active
+      refreshProgressNotifications();
       alert("Saved!", `${count} ${exercise}s recorded.`, [
         { text: "OK", onPress: () => router.back() },
       ]);
