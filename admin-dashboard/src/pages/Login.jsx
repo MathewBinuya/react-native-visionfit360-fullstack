@@ -2,7 +2,14 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../lib/api";
 
-// Two-step sign-in: password, then the 6-digit code emailed to the admin inbox.
+// Two-step sign-in: password, then a 6-digit code — from the admin inbox, the
+// authenticator app (if set up in Security), or a one-time backup code.
+const METHOD_COPY = {
+  email: { label: "Email code", hint: (to) => `Enter the 6-digit code sent to ${to}` },
+  app: { label: "Authenticator code", hint: () => "Enter the 6-digit code from your authenticator app" },
+  backup: { label: "Backup code", hint: () => "Enter one of your saved backup codes (e.g. abcd-1234)" },
+};
+
 export default function Login() {
   const [step, setStep] = useState("password");
   const [email, setEmail] = useState("");
@@ -10,6 +17,8 @@ export default function Login() {
   const [code, setCode] = useState("");
   const [challenge, setChallenge] = useState("");
   const [sentTo, setSentTo] = useState("");
+  const [methods, setMethods] = useState({ email: true, app: false, backup: false });
+  const [method, setMethod] = useState("email");
   const [resendIn, setResendIn] = useState(0);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
@@ -23,11 +32,26 @@ export default function Login() {
   }, [resendIn]);
 
   const enterCodeStep = (data) => {
+    const m = data.methods || { email: true };
     setChallenge(data.challenge);
     setSentTo(data.email);
+    setMethods(m);
     setResendIn(data.resendInSeconds ?? 60);
     setCode("");
     setStep("code");
+    if (!m.email && m.app) {
+      setMethod("app");
+      setInfo("The email code couldn't be sent. Use your authenticator app.");
+    } else {
+      setMethod("email");
+    }
+  };
+
+  const switchMethod = (m) => {
+    setMethod(m);
+    setCode("");
+    setError("");
+    setInfo("");
   };
 
   const backToPassword = (message = "") => {
@@ -59,7 +83,7 @@ export default function Login() {
     setInfo("");
     setLoading(true);
     try {
-      const res = await api.post("/login/verify", { challenge, code });
+      const res = await api.post("/login/verify", { challenge, code, method });
       localStorage.setItem("adminToken", res.data.token);
       localStorage.setItem("adminName", res.data.admin.name);
       navigate("/dashboard");
@@ -88,30 +112,36 @@ export default function Login() {
   };
 
   if (step === "code") {
+    const isBackup = method === "backup";
+    const ready = isBackup ? code.replace(/[^a-z0-9]/gi, "").length === 8 : code.length === 6;
+    const others = ["email", "app", "backup"].filter((m) => m !== method && (m === "email" || methods[m]));
+
     return (
       <div className="login-wrap">
         <form className="login-card" onSubmit={handleVerify}>
           <h1>VisionFIT360</h1>
-          <p className="subtitle">Enter the 6-digit code sent to {sentTo}</p>
+          <p className="subtitle">{METHOD_COPY[method].hint(sentTo)}</p>
 
           {error && <div className="error">{error}</div>}
           {info && <div className="notice">{info}</div>}
 
-          <label>Login code</label>
+          <label>{METHOD_COPY[method].label}</label>
           <input
             className="otp-input"
             type="text"
-            inputMode="numeric"
+            inputMode={isBackup ? "text" : "numeric"}
             autoComplete="one-time-code"
-            maxLength={6}
+            maxLength={isBackup ? 9 : 6}
             value={code}
-            onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-            placeholder="••••••"
+            onChange={(e) =>
+              setCode(isBackup ? e.target.value.toLowerCase().slice(0, 9) : e.target.value.replace(/\D/g, "").slice(0, 6))
+            }
+            placeholder={isBackup ? "abcd-1234" : "••••••"}
             autoFocus
             required
           />
 
-          <button type="submit" disabled={loading || code.length !== 6}>
+          <button type="submit" disabled={loading || !ready}>
             {loading ? "Verifying..." : "Verify & Sign In"}
           </button>
 
@@ -119,11 +149,20 @@ export default function Login() {
             <button type="button" className="link-btn" onClick={() => backToPassword()}>
               ← Back
             </button>
-            <button type="button" className="link-btn" onClick={handleResend} disabled={resendIn > 0}>
-              {resendIn > 0 ? `Resend code in ${resendIn}s` : "Resend code"}
-            </button>
+            {method === "email" && (
+              <button type="button" className="link-btn" onClick={handleResend} disabled={resendIn > 0}>
+                {resendIn > 0 ? `Resend code in ${resendIn}s` : "Resend code"}
+              </button>
+            )}
           </div>
-          <p className="login-hint">Code expires in 10 minutes. Check Spam if it doesn't arrive.</p>
+
+          {others.map((m) => (
+            <button key={m} type="button" className="link-btn login-switch" onClick={() => switchMethod(m)}>
+              {m === "email" ? "Use the email code instead" : m === "app" ? "Use authenticator app instead" : "Use a backup code"}
+            </button>
+          ))}
+
+          {method === "email" && <p className="login-hint">Code expires in 10 minutes. Check Spam if it doesn't arrive.</p>}
         </form>
       </div>
     );
@@ -142,7 +181,7 @@ export default function Login() {
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          placeholder="visionfit360@gmail.com"
+          placeholder="Admin User"
           required
         />
 

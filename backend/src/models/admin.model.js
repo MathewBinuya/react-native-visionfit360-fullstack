@@ -13,6 +13,13 @@ const adminSchema = new mongoose.Schema(
     otpExpiresAt: { type: Date, select: false },
     otpAttempts: { type: Number, default: 0, select: false },
     otpSentAt: { type: Date, select: false },
+    otpChallengeId: { type: String, select: false }, // the one pending sign-in allowed to finish
+    // authenticator app (TOTP) — secret encrypted at rest, backup codes hashed
+    totpEnabled: { type: Boolean, default: false },
+    totpSecretEnc: { type: String, select: false },
+    totpPendingEnc: { type: String, select: false }, // during setup, before the first code is confirmed
+    totpLastStep: { type: Number, select: false },   // blocks reusing a code
+    backupCodes: { type: [String], select: false },
   },
   { timestamps: true },
   

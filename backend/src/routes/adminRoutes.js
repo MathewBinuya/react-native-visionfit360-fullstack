@@ -1,7 +1,9 @@
 import express from "express";
 import adminProtect from "../middleware/admin.middleware.js";
 import {
-  adminLogin, verifyAdminOtp, resendAdminOtp, getStats, getDashboard, getPresence,
+  adminLogin, verifyAdminOtp, resendAdminOtp,
+  getTwoFactorStatus, startTwoFactorSetup, confirmTwoFactorSetup, regenerateBackupCodes, disableTwoFactor,
+  getStats, getDashboard, getPresence,
   getExerciseUsage, getUsersByExercise,
   getUsers, getUserById, deleteUser, updateUserStatus,
   getExercises, createExercise, updateExercise, deleteExercise,
@@ -16,6 +18,12 @@ router.post("/login/verify", verifyAdminOtp);   // step 2: code -> admin token
 router.post("/login/resend", resendAdminOtp);   // resend code (60s cooldown)
 
 // protected (admin only)
+router.get("/security/2fa", adminProtect, getTwoFactorStatus);
+router.post("/security/2fa/setup", adminProtect, startTwoFactorSetup);         // returns QR data (signed-in only)
+router.post("/security/2fa/enable", adminProtect, confirmTwoFactorSetup);      // first code -> on + backup codes
+router.post("/security/2fa/backup-codes", adminProtect, regenerateBackupCodes);
+router.post("/security/2fa/disable", adminProtect, disableTwoFactor);
+
 router.get("/stats", adminProtect, getStats);         // legacy counts (kept for back-compat)
 router.get("/dashboard", adminProtect, getDashboard); // full aggregated dashboard
 router.get("/presence", adminProtect, getPresence);   // lightweight presence (poll frequently)

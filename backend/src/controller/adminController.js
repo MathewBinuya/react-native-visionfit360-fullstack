@@ -3,6 +3,10 @@ import crypto from "crypto";
 import Admin from "../models/admin.model.js";
 import { sendEmail } from "../lib/email.js";
 import { ADMIN_EMAIL, isAllowedAdmin } from "../lib/adminAccess.js";
+import {
+  generateTotpSecret, verifyTotp, otpauthUrl, encryptSecret, decryptSecret,
+  generateBackupCodes, hashBackupCode,
+} from "../lib/totp.js";
 import User from "../models/user.model.js";
 import Workout from "../models/workout.model.js";
 import Exercise from "../models/exercise.model.js";
@@ -43,13 +47,15 @@ const exerciseUsagePipeline = (limit = 50) => [
 ];
 
 //  AUTH 
-// Two-step login: password, then a 6-digit code emailed to ADMIN_EMAIL.
+// Two-step login: password, then ONE of — the 6-digit code emailed to
+// ADMIN_EMAIL, an authenticator-app code, or a one-time backup code.
 // Login responses never use 401 — the dashboard's API client treats 401 as
 // "session expired" and reloads to /login, which would interrupt this flow.
 const OTP_TTL_MS = 10 * 60 * 1000;
 const OTP_RESEND_MS = 60 * 1000;
 const OTP_MAX_ATTEMPTS = 5;
-const OTP_SELECT = "+otpHash +otpExpiresAt +otpAttempts +otpSentAt";
+const OTP_SELECT = "+otpHash +otpExpiresAt +otpAttempts +otpSentAt +otpChallengeId +totpSecretEnc +totpLastStep +backupCodes";
+const TOTP_ISSUER = "VisionFIT360 Admin";
 
 const hashOtp = (code) => crypto.createHash("sha256").update(String(code).trim()).digest("hex");
 
@@ -61,17 +67,25 @@ const otpMatches = (code, hash) => {
 };
 
 // Short-lived pass between step 1 and step 2. Its role is NOT "admin", so
-// adminProtect rejects it for every dashboard route.
-const otpChallenge = (id) =>
-  jwt.sign({ id, role: "admin-otp" }, process.env.JWT_SECRET, { expiresIn: Math.floor(OTP_TTL_MS / 1000) });
+// adminProtect rejects it for every dashboard route. `cid` ties it to the one
+// pending sign-in stored on the admin, so it can't be reused after it finishes.
+const otpChallenge = (id, cid) =>
+  jwt.sign({ id, cid, role: "admin-otp" }, process.env.JWT_SECRET, { expiresIn: Math.floor(OTP_TTL_MS / 1000) });
 
 const readChallenge = (token) => {
   try {
-    const decoded = jwt.verify(String(token || ""), process.env.JWT_SECRET);
-    return decoded.role === "admin-otp" ? decoded.id : null;
+    const d = jwt.verify(String(token || ""), process.env.JWT_SECRET);
+    return d.role === "admin-otp" && d.cid ? { id: d.id, cid: d.cid } : null;
   } catch {
     return null;
   }
+};
+
+const loadPendingAdmin = async (challenge) => {
+  const c = readChallenge(challenge);
+  if (!c) return null;
+  const admin = await Admin.findById(c.id).select(OTP_SELECT);
+  return isAllowedAdmin(admin) && admin.otpChallengeId && admin.otpChallengeId === c.cid ? admin : null;
 };
 
 const maskEmail = (email) => {
@@ -92,14 +106,12 @@ const otpEmailHtml = (code) => `
   </div>
 `;
 
-// Issues + emails a fresh code. Returns false if the email could not be sent.
+// Issues + emails a fresh code (caller saves). Returns false if sending failed.
 const sendAdminOtp = async (admin) => {
   const code = crypto.randomInt(100000, 1000000).toString();
   admin.otpHash = hashOtp(code);
   admin.otpExpiresAt = new Date(Date.now() + OTP_TTL_MS);
-  admin.otpAttempts = 0;
   admin.otpSentAt = new Date();
-  await admin.save();
   try {
     await sendEmail({ to: ADMIN_EMAIL, subject: "VisionFIT360 — Admin login code", html: otpEmailHtml(code) });
     return true;
@@ -108,17 +120,23 @@ const sendAdminOtp = async (admin) => {
     admin.otpHash = undefined;
     admin.otpExpiresAt = undefined;
     admin.otpSentAt = undefined;
-    await admin.save();
     return false;
   }
 };
 
-const otpStepResponse = (admin) => ({
+const otpStepResponse = (admin, emailSent) => ({
   otpRequired: true,
-  challenge: otpChallenge(admin._id),
+  challenge: otpChallenge(admin._id, admin.otpChallengeId),
   email: maskEmail(ADMIN_EMAIL),
-  expiresInSeconds: Math.max(0, Math.round((admin.otpExpiresAt - Date.now()) / 1000)),
-  resendInSeconds: Math.max(0, Math.ceil((admin.otpSentAt.getTime() + OTP_RESEND_MS - Date.now()) / 1000)),
+  methods: {
+    email: !!emailSent,
+    app: !!admin.totpEnabled,
+    backup: !!admin.totpEnabled && (admin.backupCodes?.length || 0) > 0,
+  },
+  expiresInSeconds: Math.round(OTP_TTL_MS / 1000),
+  resendInSeconds: admin.otpSentAt
+    ? Math.max(0, Math.ceil((admin.otpSentAt.getTime() + OTP_RESEND_MS - Date.now()) / 1000))
+    : 0,
 });
 
 // STEP 1 — email + password. Only ADMIN_EMAIL may sign in.
@@ -134,36 +152,60 @@ export const adminLogin = async (req, res) => {
     const match = await admin.comparePassword(String(password || ""));
     if (!match) return res.status(400).json({ message: "Invalid credentials" });
 
+    admin.otpChallengeId = crypto.randomBytes(16).toString("hex");
+    admin.otpAttempts = 0;
+
     // A still-valid code sent under a minute ago is reused instead of emailing again.
     const recent = admin.otpHash && admin.otpExpiresAt > new Date() && Date.now() - admin.otpSentAt < OTP_RESEND_MS;
-    if (!recent && !(await sendAdminOtp(admin))) {
+    const emailSent = recent || (await sendAdminOtp(admin));
+
+    // Without an authenticator, email is the only way in.
+    if (!emailSent && !admin.totpEnabled) {
+      admin.otpChallengeId = undefined;
+      await admin.save();
       return res.status(502).json({ message: "Couldn't send the login code. Please try again." });
     }
-    res.json(otpStepResponse(admin));
+    await admin.save();
+    res.json(otpStepResponse(admin, emailSent));
   } catch (error) {
     res.status(500).json({ message: "Server error" });
   }
 };
 
-// STEP 2 — the emailed code. Returns the real admin token.
+// STEP 2 — finish with an email code (default), authenticator code, or backup code.
 export const verifyAdminOtp = async (req, res) => {
   try {
-    const id = readChallenge(req.body.challenge);
-    if (!id) return res.status(400).json({ message: "Your sign-in expired. Please sign in again.", restart: true });
+    const admin = await loadPendingAdmin(req.body.challenge);
+    if (!admin) return res.status(400).json({ message: "Your sign-in expired. Please sign in again.", restart: true });
 
-    const admin = await Admin.findById(id).select(OTP_SELECT);
-    if (!isAllowedAdmin(admin) || !admin.otpHash) {
-      return res.status(400).json({ message: "Please sign in again.", restart: true });
-    }
-    if (admin.otpExpiresAt < new Date()) {
-      return res.status(400).json({ message: "This code has expired. Tap Resend code.", expired: true });
+    const method = ["email", "app", "backup"].includes(req.body.method) ? req.body.method : "email";
+    const code = String(req.body.code || "").trim();
+    let ok = false;
+
+    if (method === "email") {
+      if (!admin.otpHash) return res.status(400).json({ message: "No email code is active. Tap Resend code." });
+      if (admin.otpExpiresAt < new Date()) {
+        return res.status(400).json({ message: "This code has expired. Tap Resend code.", expired: true });
+      }
+      ok = otpMatches(code, admin.otpHash);
+    } else if (method === "app") {
+      const secret = admin.totpEnabled && decryptSecret(admin.totpSecretEnc);
+      const step = secret ? verifyTotp(secret, code) : null;
+      ok = step != null && step > (admin.totpLastStep || 0);
+      if (ok) admin.totpLastStep = step;
+    } else {
+      const h = hashBackupCode(code);
+      const idx = admin.totpEnabled ? (admin.backupCodes || []).indexOf(h) : -1;
+      ok = idx >= 0;
+      if (ok) admin.backupCodes.splice(idx, 1);
     }
 
-    if (!otpMatches(req.body.code, admin.otpHash)) {
+    if (!ok) {
       admin.otpAttempts = (admin.otpAttempts || 0) + 1;
       if (admin.otpAttempts >= OTP_MAX_ATTEMPTS) {
         admin.otpHash = undefined;
         admin.otpExpiresAt = undefined;
+        admin.otpChallengeId = undefined;
         await admin.save();
         return res.status(400).json({ message: "Too many wrong codes. Please sign in again.", restart: true });
       }
@@ -174,39 +216,138 @@ export const verifyAdminOtp = async (req, res) => {
 
     admin.otpHash = undefined;
     admin.otpExpiresAt = undefined;
+    admin.otpChallengeId = undefined;
     admin.otpAttempts = 0;
     await admin.save();
 
     res.json({
       token: generateAdminToken(admin._id),
       admin: { id: admin._id, username: admin.username, email: admin.email, name: admin.name },
+      backupCodesLeft: admin.totpEnabled ? admin.backupCodes.length : null,
     });
   } catch (error) {
     res.status(500).json({ message: "Server error" });
   }
 };
 
-// Resend the code (once per minute) without re-entering the password.
+// Resend the email code (once per minute) without re-entering the password.
 export const resendAdminOtp = async (req, res) => {
   try {
-    const id = readChallenge(req.body.challenge);
-    if (!id) return res.status(400).json({ message: "Your sign-in expired. Please sign in again.", restart: true });
-
-    const admin = await Admin.findById(id).select(OTP_SELECT);
-    if (!isAllowedAdmin(admin)) return res.status(400).json({ message: "Please sign in again.", restart: true });
+    const admin = await loadPendingAdmin(req.body.challenge);
+    if (!admin) return res.status(400).json({ message: "Your sign-in expired. Please sign in again.", restart: true });
 
     const wait = admin.otpSentAt ? admin.otpSentAt.getTime() + OTP_RESEND_MS - Date.now() : 0;
     if (wait > 0) {
       return res.status(429).json({ message: `Please wait ${Math.ceil(wait / 1000)}s before resending.`, resendInSeconds: Math.ceil(wait / 1000) });
     }
-    if (!(await sendAdminOtp(admin))) {
-      return res.status(502).json({ message: "Couldn't send the login code. Please try again." });
+    const sent = await sendAdminOtp(admin);
+    await admin.save();
+    if (!sent) {
+      return res.status(502).json({
+        message: admin.totpEnabled
+          ? "Couldn't send the email code. Use your authenticator app instead."
+          : "Couldn't send the login code. Please try again.",
+      });
     }
-    res.json(otpStepResponse(admin));
+    res.json(otpStepResponse(admin, true));
   } catch (error) {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+//  SECURITY — authenticator app (only reachable when already signed in)
+const TOTP_SELECT = "+password +totpSecretEnc +totpPendingEnc +totpLastStep +backupCodes";
+
+const newBackupCodes = (admin) => {
+  const codes = generateBackupCodes(8);
+  admin.backupCodes = codes.map(hashBackupCode);
+  return codes;
+};
+
+export const getTwoFactorStatus = async (req, res) => {
+  try {
+    const admin = await Admin.findById(req.admin._id).select(TOTP_SELECT);
+    res.json({ enabled: !!admin.totpEnabled, backupCodesLeft: admin.totpEnabled ? admin.backupCodes?.length || 0 : 0, account: ADMIN_EMAIL });
+  } catch (error) {
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// Starts setup: a new secret is kept as "pending" until a first code confirms it.
+export const startTwoFactorSetup = async (req, res) => {
+  try {
+    const admin = await Admin.findById(req.admin._id).select(TOTP_SELECT);
+    if (admin.totpEnabled) return res.status(400).json({ message: "The authenticator is already set up. Turn it off first to set up a new one." });
+    const secret = generateTotpSecret();
+    admin.totpPendingEnc = encryptSecret(secret);
+    await admin.save();
+    res.json({ secret, otpauthUrl: otpauthUrl({ secret, account: ADMIN_EMAIL, issuer: TOTP_ISSUER }) });
+  } catch (error) {
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const confirmTwoFactorSetup = async (req, res) => {
+  try {
+    const admin = await Admin.findById(req.admin._id).select(TOTP_SELECT);
+    const secret = admin.totpPendingEnc && decryptSecret(admin.totpPendingEnc);
+    if (!secret) return res.status(400).json({ message: "Start the setup again." });
+    const step = verifyTotp(secret, req.body.code);
+    if (step == null) return res.status(400).json({ message: "That code didn't match. Check your phone's time is automatic and try the newest code." });
+
+    admin.totpSecretEnc = admin.totpPendingEnc;
+    admin.totpPendingEnc = undefined;
+    admin.totpEnabled = true;
+    admin.totpLastStep = step;
+    const backupCodes = newBackupCodes(admin);
+    await admin.save();
+    res.json({ enabled: true, backupCodes });
+  } catch (error) {
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const regenerateBackupCodes = async (req, res) => {
+  try {
+    const admin = await Admin.findById(req.admin._id).select(TOTP_SELECT);
+    if (!admin.totpEnabled) return res.status(400).json({ message: "Set up the authenticator first." });
+    const step = verifyTotp(decryptSecret(admin.totpSecretEnc), req.body.code);
+    if (step == null || step <= (admin.totpLastStep || 0)) return res.status(400).json({ message: "Enter a current code from your authenticator app." });
+    admin.totpLastStep = step;
+    const backupCodes = newBackupCodes(admin);
+    await admin.save();
+    res.json({ backupCodes });
+  } catch (error) {
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// Turning it off needs the password AND an authenticator or backup code.
+export const disableTwoFactor = async (req, res) => {
+  try {
+    const admin = await Admin.findById(req.admin._id).select(TOTP_SELECT);
+    if (!admin.totpEnabled) return res.json({ enabled: false });
+    if (!(await admin.comparePassword(String(req.body.password || "")))) {
+      return res.status(400).json({ message: "Incorrect password." });
+    }
+    const code = String(req.body.code || "").trim();
+    const step = verifyTotp(decryptSecret(admin.totpSecretEnc), code);
+    const backupOk = (admin.backupCodes || []).includes(hashBackupCode(code));
+    if (!(step != null && step > (admin.totpLastStep || 0)) && !backupOk) {
+      return res.status(400).json({ message: "Enter a current authenticator code or a backup code." });
+    }
+    admin.totpEnabled = false;
+    admin.totpSecretEnc = undefined;
+    admin.totpPendingEnc = undefined;
+    admin.totpLastStep = undefined;
+    admin.backupCodes = [];
+    await admin.save();
+    res.json({ enabled: false });
+  } catch (error) {
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 
 //  ANALYTICS
 export const getStats = async (req, res) => {

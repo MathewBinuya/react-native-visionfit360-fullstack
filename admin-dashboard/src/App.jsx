@@ -4,6 +4,7 @@ import Dashboard from "./pages/Dashboard";
 import Users from "./pages/Users";
 import UsersPerExercise from "./pages/UsersPerExercise";
 import UserDetail from "./pages/UserDetail";
+import Security from "./pages/Security";
 import "./App.css";
 
 function Protected({ children }) {
@@ -20,6 +21,7 @@ export default function App() {
         <Route path="/users" element={<Protected><Users /></Protected>} />
         <Route path="/users-per-exercise" element={<Protected><UsersPerExercise /></Protected>} />
         <Route path="/users/:id" element={<Protected><UserDetail /></Protected>} />
+        <Route path="/security" element={<Protected><Security /></Protected>} />
         <Route path="*" element={<Navigate to="/login" />} />
       </Routes>
     </BrowserRouter>
