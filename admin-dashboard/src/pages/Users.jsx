@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import { Avatar, StateBlock } from "../components/ui";
 import api from "../lib/api";
-import { relativeTime, displayName, accountStatus, ACCOUNT_ACTIVE_DAYS } from "../lib/format";
+import { relativeTime, displayName, accountStatus, lastSeen, ACCOUNT_ACTIVE_DAYS } from "../lib/format";
 
 const SORTS = {
   newest: { label: "Newest users", fn: (a, b) => new Date(b.createdAt) - new Date(a.createdAt) },
@@ -43,7 +43,7 @@ export default function Users() {
         if (!hay.includes(q)) return false;
       }
       if (statusFilter !== "all") {
-        const isActive = accountStatus(u.lastLoginAt).active;
+        const isActive = accountStatus(u).active;
         if (statusFilter === "active" && !isActive) return false;
         if (statusFilter === "inactive" && isActive) return false;
       }
@@ -58,7 +58,7 @@ export default function Users() {
       <div className="main">
         <h1 className="page-title">Users</h1>
         <p className="page-sub" style={{ marginBottom: 20 }}>
-          Status is automatic — logged in within {ACCOUNT_ACTIVE_DAYS} days = Active.
+          Status is automatic — active in the app within {ACCOUNT_ACTIVE_DAYS} days = Active.
         </p>
 
         <div className="toolbar">
@@ -93,13 +93,14 @@ export default function Users() {
                   <th>User</th>
                   <th>Email</th>
                   <th>Status</th>
-                  <th>Last login</th>
+                  <th>Last active</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
                 {visible.map((u) => {
-                  const st = accountStatus(u.lastLoginAt);
+                  const st = accountStatus(u);
+                  const seen = lastSeen(u);
                   return (
                     <tr key={u._id} className="clickable" onClick={() => navigate(`/users/${u._id}`)}>
                       <td className="user-cell">
@@ -111,7 +112,7 @@ export default function Users() {
                       </td>
                       <td className="muted">{u.email}</td>
                       <td><span className={`badge ${st.className}`}>{st.label}</span></td>
-                      <td className="muted">{u.lastLoginAt ? relativeTime(u.lastLoginAt) : "Never"}</td>
+                      <td className="muted">{seen ? relativeTime(seen) : "Never"}</td>
                       <td>
                         <button
                           className="btn-small"

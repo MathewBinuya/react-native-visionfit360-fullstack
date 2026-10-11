@@ -4,7 +4,7 @@ import Sidebar from "../components/Sidebar";
 import { RatingStars, Avatar, StateBlock } from "../components/ui";
 import api from "../lib/api";
 import {
-  relativeTime, dateTime, shortDate, ageFromDob, bmiInfo, exerciseLabel, displayName, accountStatus,
+  relativeTime, dateTime, shortDate, bmiInfo, exerciseLabel, displayName, accountStatus,
 } from "../lib/format";
 
 const GOAL_LABELS = {
@@ -40,9 +40,8 @@ export default function UserDetail() {
   useEffect(() => { load(); }, [load]);
 
   const u = data?.user;
-  const age = u ? ageFromDob(u.dateOfBirth) : null;
   const bmi = u ? bmiInfo(u.heightCm, u.weightKg) : null;
-  const st = u ? accountStatus(u.lastLoginAt) : null;
+  const st = u ? accountStatus(u) : null;
 
   return (
     <div className="layout">
@@ -83,7 +82,6 @@ export default function UserDetail() {
                   <h3 className="card-title">Body &amp; demographics</h3>
                   <Row label="Gender" value={u.gender ? u.gender.charAt(0).toUpperCase() + u.gender.slice(1) : null} />
                   <Row label="Date of birth" value={u.dateOfBirth ? shortDate(u.dateOfBirth) : null} />
-                  <Row label="Age" value={age != null ? `${age} yrs` : null} />
                   <Row label="Height" value={u.heightCm ? `${u.heightCm} cm` : null} />
                   <Row label="Weight" value={u.weightKg ? `${u.weightKg} kg` : null} />
                   <Row label="BMI" value={bmi ? `${bmi.bmi} (${bmi.category})` : null} />

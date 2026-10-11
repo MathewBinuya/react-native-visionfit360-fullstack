@@ -60,18 +60,6 @@ export const PRESENCE_META = {
 
 export const presenceMeta = (status) => PRESENCE_META[status] || PRESENCE_META.inactive;
 
-// compute age from a date-of-birth string
-export const ageFromDob = (dob) => {
-  if (!dob) return null;
-  const d = new Date(dob);
-  if (Number.isNaN(d.getTime())) return null;
-  const now = new Date();
-  let age = now.getFullYear() - d.getFullYear();
-  const m = now.getMonth() - d.getMonth();
-  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age--;
-  return age >= 0 && age < 130 ? age : null;
-};
-
 // compute BMI + category from height/weight (same thresholds as the backend)
 export const bmiInfo = (heightCm, weightKg) => {
   if (!heightCm || !weightKg) return null;
@@ -86,13 +74,24 @@ export const bmiInfo = (heightCm, weightKg) => {
 
 export const displayName = (u) => u?.name || u?.username || "Unknown user";
 
-// Automatic account status: logged in within the last N days -> Active, else Inactive.
-// Based on the existing lastLoginAt field — no separate status system. Tunable.
+// Automatic account status: Active = used (or logged into) the app within the last
+// N days, else Inactive. The mobile app keeps users logged in for weeks, so the real
+// "used the app" signal is lastActiveAt (refreshed by the heartbeat), NOT lastLoginAt.
+// We take the later of the two so a persistent daily user stays Active, and an
+// inactive user flips back to Active automatically the moment they reopen the app.
+// No manual/hardcoded statuses. Tunable.
 export const ACCOUNT_ACTIVE_DAYS = 7;
 
-export const accountStatus = (lastLoginAt, days = ACCOUNT_ACTIVE_DAYS) => {
-  const active =
-    !!lastLoginAt && Date.now() - new Date(lastLoginAt).getTime() <= days * 24 * 60 * 60 * 1000;
+// Effective "last seen" (ms epoch) for a user, or 0 if never seen.
+export const lastSeen = (user) => {
+  const a = user?.lastActiveAt ? new Date(user.lastActiveAt).getTime() : 0;
+  const l = user?.lastLoginAt ? new Date(user.lastLoginAt).getTime() : 0;
+  return Math.max(a || 0, l || 0);
+};
+
+export const accountStatus = (user, days = ACCOUNT_ACTIVE_DAYS) => {
+  const seen = lastSeen(user);
+  const active = seen > 0 && Date.now() - seen <= days * 24 * 60 * 60 * 1000;
   return active
     ? { active: true, label: "Active", className: "badge-presence-active" }
     : { active: false, label: "Inactive", className: "badge-presence-inactive" };

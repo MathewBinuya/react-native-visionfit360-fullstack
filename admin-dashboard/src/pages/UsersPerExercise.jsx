@@ -21,13 +21,24 @@ export default function UsersPerExercise() {
   const [usageError, setUsageError] = useState("");
 
   const [exSort, setExSort] = useState("most");
+  const [exSearch, setExSearch] = useState(""); // filter the exercise list
   const [selected, setSelected] = useState(null); // exercise key
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
 
-  const sortedUsage = useMemo(
-    () => (usage ? [...usage].sort(EX_SORTS[exSort].fn) : []),
-    [usage, exSort]
+  const sortedUsage = useMemo(() => {
+    if (!usage) return [];
+    const q = exSearch.trim().toLowerCase();
+    const list = q
+      ? usage.filter((e) => exerciseLabel(e.exercise).toLowerCase().includes(q))
+      : usage;
+    return [...list].sort(EX_SORTS[exSort].fn);
+  }, [usage, exSort, exSearch]);
+
+  // scale for the inline usage bars (proportional to the busiest exercise)
+  const maxUsers = useMemo(
+    () => (usage || []).reduce((m, e) => Math.max(m, e.userCount), 0) || 1,
+    [usage]
   );
 
   const [detail, setDetail] = useState(null); // { users, total, page }
@@ -94,23 +105,50 @@ export default function UsersPerExercise() {
               ) : null
             }
           >
+            {usage && usage.length > 0 && (
+              <div className="toolbar">
+                <input
+                  className="search-input"
+                  placeholder="Filter exercises…"
+                  value={exSearch}
+                  onChange={(e) => setExSearch(e.target.value)}
+                />
+              </div>
+            )}
             <StateBlock
               loading={!usage && !usageError}
               error={usageError}
               empty={usage && usage.length === 0}
               emptyText="No workout records yet."
             >
-              <div className="ex-grid">
-                {sortedUsage.map((e) => (
-                  <button key={e.exercise} className="ex-card" onClick={() => openExercise(e.exercise)}>
-                    <div className="ex-card-name">{exerciseLabel(e.exercise)}</div>
-                    <div className="ex-card-count">{e.userCount}</div>
-                    <div className="ex-card-sub">
-                      {e.userCount === 1 ? "user" : "users"} · {e.sessions} sessions
-                    </div>
-                  </button>
-                ))}
-              </div>
+              {sortedUsage.length === 0 ? (
+                <div className="state state-empty">No exercises match your filter.</div>
+              ) : (
+                <div className="ex-usage">
+                  <div className="ex-usage-head">
+                    <span>Exercise</span>
+                    <span className="ex-usage-metric">Users</span>
+                    <span className="ex-usage-metric">Sessions</span>
+                  </div>
+                  {sortedUsage.map((e) => (
+                    <button
+                      key={e.exercise}
+                      className="ex-usage-row"
+                      onClick={() => openExercise(e.exercise)}
+                    >
+                      <span className="ex-usage-name">{exerciseLabel(e.exercise)}</span>
+                      <span className="ex-usage-bar" aria-hidden="true">
+                        <span
+                          className="ex-usage-fill"
+                          style={{ width: `${(e.userCount / maxUsers) * 100}%` }}
+                        />
+                      </span>
+                      <span className="ex-usage-metric ex-usage-users">{e.userCount}</span>
+                      <span className="ex-usage-metric ex-usage-sessions">{e.sessions}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </StateBlock>
           </Section>
         ) : (

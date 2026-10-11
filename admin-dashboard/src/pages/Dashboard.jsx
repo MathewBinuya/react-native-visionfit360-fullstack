@@ -11,7 +11,6 @@ const EXERCISE_PREVIEW = 8;     // top-N exercises shown on the dashboard (full 
 
 const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 const GENDER_ORDER = ["male", "female", "other", "Not specified"];
-const AGE_ORDER = ["Under 18", "18-24", "25-34", "35-44", "45-54", "55+", "Not specified"];
 const BMI_ORDER = ["Underweight", "Normal", "Overweight", "Obese", "Not specified"];
 
 // turn a [{_id,count}] breakdown into ordered BarChart rows
@@ -113,8 +112,8 @@ export default function Dashboard() {
           <StateBlock loading={dashLoading && !data} error={dashError}>
             <div className="stat-grid">
               <StatCard label="Total Users" value={k?.totalUsers ?? "—"} />
-              <StatCard label="Active" value={k?.activeAccounts ?? "—"} hint={`logged in last ${k?.accountActiveDays ?? 7} days`} />
-              <StatCard label="Inactive" value={k?.inactiveAccounts ?? "—"} hint={`no login in ${k?.accountActiveDays ?? 7} days`} />
+              <StatCard label="Active" value={k?.activeAccounts ?? "—"} hint={`active in last ${k?.accountActiveDays ?? 7} days`} />
+              <StatCard label="Inactive" value={k?.inactiveAccounts ?? "—"} hint={`no activity in ${k?.accountActiveDays ?? 7} days`} />
               <StatCard label="Active now" value={counts?.active ?? "—"} hint="live · seen in last 2 min" />
             </div>
           </StateBlock>
@@ -127,10 +126,6 @@ export default function Dashboard() {
               <div className="card">
                 <h3 className="card-title">Gender</h3>
                 <Breakdown rows={toBars(demo.gender, GENDER_ORDER, cap)} />
-              </div>
-              <div className="card">
-                <h3 className="card-title">Age groups</h3>
-                <Breakdown rows={toBars(demo.ageGroups, AGE_ORDER)} />
               </div>
               <div className="card">
                 <h3 className="card-title">BMI categories</h3>
@@ -237,7 +232,7 @@ export default function Dashboard() {
           <StateBlock loading={dashLoading && !data} error={dashError}>
             <div className="stat-grid">
               <StatCard label="New users" value={k?.newUsers ?? "—"} hint={`last ${range}d`} />
-              <StatCard label="Active users" value={k?.activeAccounts ?? "—"} hint={`logged in last ${k?.accountActiveDays ?? 7} days`} />
+              <StatCard label="Active users" value={k?.activeAccounts ?? "—"} hint={`active in last ${k?.accountActiveDays ?? 7} days`} />
               <StatCard label="Sessions" value={k?.sessionsInRange ?? "—"} hint={`last ${range}d`} />
               <StatCard label="Avg rating" value={k?.avgRating ? `${k.avgRating}/5` : "—"} hint={`${k?.feedbackCount ?? 0} reviews`} />
             </div>
