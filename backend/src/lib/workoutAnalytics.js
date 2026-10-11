@@ -87,6 +87,41 @@ const buildRecords = (workouts) => {
   return [...map.values()];
 };
 
+// Completed workouts per Manila calendar day for the activity grid: 53 Monday-start
+// weeks ending today. `days` is sparse — only days with at least one workout.
+const CALENDAR_WEEKS = 53;
+const buildCalendar = (workouts, now) => {
+  const today = manilaDayIndex(now);
+  const start = weekStartDay(now) - (CALENDAR_WEEKS - 1) * 7;
+  const days = {};
+  for (const w of workouts) {
+    const day = manilaDayIndex(whenOf(w));
+    if (day < start || day > today) continue;
+    const key = dayToISODate(day);
+    days[key] = (days[key] || 0) + 1;
+  }
+
+  const active = Object.keys(days).length;
+  let currentDayStreak = 0;
+  for (let d = days[dayToISODate(today)] ? today : today - 1; days[dayToISODate(d)]; d--) currentDayStreak++;
+  let longestDayStreak = 0;
+  let run = 0;
+  for (let d = start; d <= today; d++) {
+    run = days[dayToISODate(d)] ? run + 1 : 0;
+    longestDayStreak = Math.max(longestDayStreak, run);
+  }
+
+  return {
+    start: dayToISODate(start),
+    end: dayToISODate(today),
+    days,
+    activeDays: active,
+    totalWorkouts: Object.values(days).reduce((a, b) => a + b, 0),
+    currentDayStreak,
+    longestDayStreak,
+  };
+};
+
 const buildInsights = ({ weeks, summary, records, now }) => {
   const insights = [];
   if (!summary.totalWorkouts) return insights;
@@ -178,6 +213,7 @@ export const computeAnalytics = (workouts, { weeks = 8, now = new Date(), pendin
 
   const records = buildRecords(workouts);
   const insights = buildInsights({ weeks: allWeeks, summary, records, now });
+  const calendar = buildCalendar(workouts, now);
 
   const recentPRs = records
     .flatMap((r) => r.prs)
@@ -206,6 +242,7 @@ export const computeAnalytics = (workouts, { weeks = 8, now = new Date(), pendin
     records: publicRecords,
     recentPRs,
     insights,
+    calendar,
   };
 };
 
