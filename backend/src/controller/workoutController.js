@@ -49,11 +49,19 @@ export const getWorkout = async (req, res) => {
   }
 };
 
+// Fields a user may edit. Ownership (`user`) and completion state are never
+// taken from the request body — completion goes through PATCH /:id/complete.
+const EDITABLE_WORKOUT_FIELDS = ["title", "date", "exercises", "durationMinutes", "notes"];
+
 export const updateWorkout = async (req, res) => {
   try {
+    const updates = {};
+    for (const key of EDITABLE_WORKOUT_FIELDS) {
+      if (req.body?.[key] !== undefined) updates[key] = req.body[key];
+    }
     const workout = await Workout.findOneAndUpdate(
       { _id: req.params.id, user: req.user.id },
-      req.body,
+      { $set: updates },
       { new: true, runValidators: true }
     );
     if (!workout) return res.status(404).json({ message: "Not found" });
