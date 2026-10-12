@@ -6,22 +6,33 @@ import { Ionicons } from "@expo/vector-icons"
 import COLORS from "../constants/colors"
 import styles from '../assets/styles/history.style'
 import api from '../lib/axios'
+import { useAuthStore } from '../store/authStore'
+import { getPendingAsHistory, mergeHistory, onSyncComplete } from '../lib/offlineWorkouts'
 
 export default function History() {
+  const user = useAuthStore((s) => s.user);
   const [workouts, setWorkouts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [menuWorkout, setMenuWorkout] = useState(null);  
+  const [menuWorkout, setMenuWorkout] = useState(null);
 
   useEffect(() => {
     loadHistory();
+    // Refresh once a background sync turns a pending item into a real record.
+    const off = onSyncComplete(() => { loadHistory(); });
+    return off;
   }, []);
 
   const loadHistory = async () => {
+    // Workouts completed offline live in the pending queue until they sync — show
+    // them here too (badged), so history reflects everything the user has done.
+    const pending = await getPendingAsHistory(user);
     try {
       const res = await api.get("/workouts?completed=true");
-      setWorkouts(res.data);
+      setWorkouts(mergeHistory(res.data, pending));
     } catch (error) {
       console.log("Failed to load history", error.message);
+      // Offline: still show what's completed locally.
+      setWorkouts(pending);
     } finally {
       setLoading(false);
     }
@@ -110,15 +121,27 @@ export default function History() {
                   <Text style={styles.cardDate}>
                     {new Date(w.completedAt || w.date).toLocaleDateString()}
                   </Text>
+                  {/* completed offline, not yet uploaded */}
+                  {w._pending && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                      <Ionicons name="cloud-upload-outline" size={13} color="#9A6400" />
+                      <Text style={{ fontSize: 12, color: '#9A6400', fontWeight: '600' }}>
+                        Saved offline · will sync
+                      </Text>
+                    </View>
+                  )}
                 </View>
-                {/* THREE DOTS button */}
-                <TouchableOpacity
-                  onPress={() => setMenuWorkout(w)}
-                  hitSlop={10}
-                  style={{ padding: 4 }}
-                >
-                  <Ionicons name="ellipsis-vertical" size={20} color={COLORS.placeholderText} />
-                </TouchableOpacity>
+                {/* THREE DOTS — only for synced records (a pending item isn't on the
+                    server yet, so it can't be duplicated or deleted there). */}
+                {!w._pending && (
+                  <TouchableOpacity
+                    onPress={() => setMenuWorkout(w)}
+                    hitSlop={10}
+                    style={{ padding: 4 }}
+                  >
+                    <Ionicons name="ellipsis-vertical" size={20} color={COLORS.placeholderText} />
+                  </TouchableOpacity>
+                )}
               </View>
 
               {/* total volume stat */}

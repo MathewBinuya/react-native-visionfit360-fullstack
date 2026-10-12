@@ -1,5 +1,6 @@
 import Workout from "../models/workout.model.js";
 import { getUserAnalytics } from "../lib/workoutAnalytics.js";
+import { planCompletion } from "../lib/workoutCompletion.js";
 
 // Weekly volume / workout counts / PRs / overload feedback, derived from completed workouts.
 export const getAnalytics = async (req, res) => {
@@ -71,17 +72,46 @@ export const updateWorkout = async (req, res) => {
   }
 };
 
-//  mark a workout as done - moves it to history
+//  mark a workout as done - moves it to history.
+//  Idempotent so offline completions can be retried safely (dropped responses,
+//  app restarts, repeated sync passes) without ever counting a workout twice:
+//   - a workout already completed is returned unchanged (its original completedAt
+//     is preserved — we never re-stamp it to "now");
+//   - the optional clientCompletionId lets us recognise an already-synced
+//     completion even if the workout is addressed again after the fact.
+//  Completion rules live in lib/workoutCompletion.js (planCompletion).
 export const completeWorkout = async (req, res) => {
   try {
-    const workout = await Workout.findOneAndUpdate(
-      { _id: req.params.id, user: req.user.id },
-      { completed: true, completedAt: new Date() },
-      { new: true }
-    );
-    if (!workout) return res.status(404).json({ message: "Not found" });
+    const { clientCompletionId } = req.body || {};
+
+    const workout = await Workout.findOne({ _id: req.params.id, user: req.user.id });
+    const plan = planCompletion({ workout, body: req.body || {} });
+
+    if (plan.kind === "not_found") {
+      // The workout id is unknown here, but if this exact offline completion was
+      // already synced under its clientCompletionId, treat the retry as success.
+      if (clientCompletionId) {
+        const already = await Workout.findOne({ clientCompletionId, user: req.user.id });
+        if (already) return res.json(already);
+      }
+      return res.status(404).json({ message: "Not found" });
+    }
+
+    if (plan.kind === "idempotent") return res.json(workout);
+
+    Object.assign(workout, plan.set);
+    await workout.save();
     res.json(workout);
   } catch (err) {
+    // A duplicate-key race on clientCompletionId (two near-simultaneous syncs of the
+    // same completion) means it is already recorded — resolve it as success.
+    if (err?.code === 11000 && req.body?.clientCompletionId) {
+      const already = await Workout.findOne({
+        clientCompletionId: req.body.clientCompletionId,
+        user: req.user.id,
+      });
+      if (already) return res.json(already);
+    }
     res.status(500).json({ message: err.message });
   }
 };

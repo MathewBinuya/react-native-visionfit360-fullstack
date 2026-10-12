@@ -3,10 +3,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import COLORS from "../../constants/colors";
 import { useHeartbeat } from "../../lib/heartbeat";
+import { useWorkoutSync } from "../../lib/workoutSync";
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
   useHeartbeat(); // keep presence fresh while the user is in the app
+  useWorkoutSync(); // flush offline workout completions on start / resume
 
   return (
     <Tabs

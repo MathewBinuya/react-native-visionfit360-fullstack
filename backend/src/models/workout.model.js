@@ -40,8 +40,13 @@ const workoutSchema = new mongoose.Schema({
   exercises: [exerciseEntrySchema],
   durationMinutes: Number,
   notes: String,
-  completed: { type: Boolean, default: false },   
-  completedAt: Date, 
+  completed: { type: Boolean, default: false },
+  completedAt: Date,
+  // Idempotency key for offline completions synced from the mobile app. Set once,
+  // when a workout is first marked complete, so a retried/duplicated sync of the
+  // same offline completion is recognised instead of counted twice. Sparse: only
+  // offline-completed workouts carry it.
+  clientCompletionId: { type: String, index: { unique: true, sparse: true } },
 },
  {timestamps: true},
 );

@@ -8,10 +8,47 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import COLORS from "../constants/colors"
 import styles from '../assets/styles/workout.style'
 import api from '../lib/axios'
+import AsyncStorage from "@react-native-async-storage/async-storage"
+import { guideSeenKey } from '../lib/progress'
+import { useAuthStore } from '../store/authStore'
+import {
+  loadActiveWorkouts,
+  completeWorkout as completeWorkoutOffline,
+  syncPending,
+  getPending,
+  onSyncComplete,
+} from '../lib/offlineWorkouts'
+
+// A request failing with no HTTP response means we're offline (vs a real server error).
+const isOffline = (error) => !error?.response;
 
 const MAX_REPS = 100;
 const MAX_WEIGHT_KG = 1000;
 const MAX_SETS_PER_EXERCISE = 20;
+
+// One-time intro that tells new users the tracker keeps working without internet.
+const OFFLINE_GUIDE_STEPS = [
+  {
+    icon: "cloud-offline-outline",
+    title: "Works without internet",
+    text: "No Wi-Fi or mobile data? You can still open your routines and mark workouts complete — the tracker keeps working offline.",
+  },
+  {
+    icon: "checkmark-circle-outline",
+    title: "Complete anytime",
+    text: "Tap Mark Complete and it's saved on your device right away. No waiting for a connection, even at the gym.",
+  },
+  {
+    icon: "sync-outline",
+    title: "Syncs automatically",
+    text: "When you're back online, completed workouts upload on their own and update your streak, history and progress — on the right day they happened.",
+  },
+  {
+    icon: "shield-checkmark-outline",
+    title: "Nothing gets lost",
+    text: "A workout saved offline uploads exactly once, even if you close the app before it syncs. You'll see “Saved offline · will sync” until it's done.",
+  },
+];
 
 const emptyExercise = () => ({
   name: '',
@@ -41,10 +78,71 @@ const validateExercises = (exercises) => {
   return null;
 };
 
+// Subtle one-line status under the header. Shows nothing when everything is
+// online and nothing is pending — offline is a normal state, not an error.
+function SyncBanner({ online, syncing, justSynced, pendingCount, onRetry }) {
+  let bg, color, icon, text, spin = false, onPress = null;
+
+  if (syncing) {
+    bg = '#EAF2FF'; color = '#2F6FEB'; icon = 'sync'; spin = true; text = 'Syncing…';
+  } else if (justSynced) {
+    bg = '#E7F6EC'; color = '#1E8E4E'; icon = 'checkmark-circle'; text = 'Synced';
+  } else if (!online && pendingCount > 0) {
+    bg = '#FFF4E5'; color = '#9A6400'; icon = 'cloud-offline-outline';
+    text = `Saved offline · ${pendingCount} waiting to sync`;
+  } else if (!online) {
+    bg = '#FFF4E5'; color = '#9A6400'; icon = 'cloud-offline-outline'; text = "You're offline";
+  } else if (pendingCount > 0) {
+    bg = '#FFF4E5'; color = '#9A6400'; icon = 'cloud-upload-outline';
+    text = `${pendingCount} waiting to sync · tap to retry`; onPress = onRetry;
+  } else {
+    return null;
+  }
+
+  return (
+    <TouchableOpacity
+      activeOpacity={onPress ? 0.7 : 1}
+      onPress={onPress || undefined}
+      style={{
+        flexDirection: 'row', alignItems: 'center', gap: 8,
+        marginHorizontal: 16, marginTop: 10, paddingVertical: 8, paddingHorizontal: 12,
+        backgroundColor: bg, borderRadius: 10,
+      }}
+    >
+      {spin
+        ? <ActivityIndicator size="small" color={color} />
+        : <Ionicons name={icon} size={16} color={color} />}
+      <Text style={{ fontSize: 13, color, fontWeight: '600', flex: 1 }}>{text}</Text>
+    </TouchableOpacity>
+  );
+}
+
 export default function Workout() {
   const insets = useSafeAreaInsets();
+  const user = useAuthStore((s) => s.user);
   const [workouts, setWorkouts] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  //  OFFLINE / SYNC STATE
+  const [online, setOnline] = useState(true);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const [justSynced, setJustSynced] = useState(false);
+
+  //  OFFLINE GUIDE (one-time per account, reopenable from the header "?")
+  const [showGuide, setShowGuide] = useState(false);
+  const guideKey = guideSeenKey("workoutOffline", user);
+
+  useEffect(() => {
+    (async () => {
+      try { if (!(await AsyncStorage.getItem(guideKey))) setShowGuide(true); } catch {}
+    })();
+  }, [guideKey]);
+
+  const closeGuide = async () => {
+    setShowGuide(false);
+    try { await AsyncStorage.setItem(guideKey, "1"); } catch {}
+  };
 
   //  ADD WORKOUT MODAL STATE 
   const [showAdd, setShowAdd] = useState(false);
@@ -105,11 +203,19 @@ export default function Workout() {
     return () => { showSub.remove(); hideSub.remove(); };
   }, []);
 
-  useEffect(() => { loadWorkouts(); }, []);
+  useEffect(() => {
+    loadWorkouts();
+    // Opening the tracker while online is a good moment to flush offline completions.
+    runSync();
+    // When a background sync finishes, refresh the list + pending badge.
+    const off = onSyncComplete(() => { loadWorkouts(); });
+    return off;
+  }, []);
 
   //  ANDROID HARDWARE BACK BUTTON 
   useEffect(() => {
     const backAction = () => {
+      if (showGuide) { closeGuide(); return true; }
       if (showAdd) { setShowAdd(false); return true; }
       if (showEdit) { setShowEdit(false); return true; }
       if (menuWorkout) { setMenuWorkout(null); return true; }
@@ -117,16 +223,44 @@ export default function Workout() {
     };
     const sub = BackHandler.addEventListener('hardwareBackPress', backAction);
     return () => sub.remove();
-  }, [showAdd, showEdit, menuWorkout]);
+  }, [showGuide, showAdd, showEdit, menuWorkout]);
+
+  const refreshPendingCount = async () => {
+    try { setPendingCount((await getPending(user)).length); } catch {}
+  };
 
   const loadWorkouts = async () => {
     try {
-      const res = await api.get("/workouts?completed=false");
-      setWorkouts(res.data);
+      // Offline-first: loads from the server when online (refreshing the cache),
+      // or from the local cache when offline. Workouts already completed offline
+      // are filtered out so they don't show as still-to-do.
+      const { workouts: list, online: isOn } = await loadActiveWorkouts(user);
+      setWorkouts(list);
+      setOnline(isOn);
     } catch (error) {
       console.log("Failed to load workouts", error.message);
     } finally {
+      await refreshPendingCount();
       setLoading(false);
+    }
+  };
+
+  // Try to upload any pending offline completions; reflect progress in the banner.
+  const runSync = async () => {
+    const before = await getPending(user);
+    if (!before.length) { setOnline(true); return; }
+    setSyncing(true);
+    try {
+      const result = await syncPending(user);
+      if (result?.synced > 0) {
+        setJustSynced(true);
+        setTimeout(() => setJustSynced(false), 2500);
+      }
+      // A confirmed sync (or a fully drained queue) proves we're online.
+      if (result?.synced > 0 || result?.remaining === 0) setOnline(true);
+    } finally {
+      setSyncing(false);
+      await refreshPendingCount();
     }
   };
 
@@ -262,19 +396,38 @@ export default function Workout() {
       setShowEdit(false);
       setEditWorkout(null);
     } catch (error) {
-      showAlert("Error", error.response?.data?.message || "Failed to save changes");
+      if (isOffline(error)) {
+        showAlert("You're offline", "Editing a routine needs a connection. You can still complete workouts offline — changes will save once you're back online.");
+      } else {
+        showAlert("Error", error.response?.data?.message || "Failed to save changes");
+      }
     } finally {
       setEditSaving(false);
     }
   };
 
-  //  COMPLETE WORKOUT 
-  const completeWorkout = async (id) => {
+  //  COMPLETE WORKOUT (offline-capable)
+  const completeWorkout = async (workout) => {
+    // Optimistic: the workout leaves the active list immediately, online or not.
+    setWorkouts(prev => prev.filter(w => w._id !== workout._id));
     try {
-      await api.patch(`/workouts/${id}/complete`);
-      setWorkouts(prev => prev.filter(w => w._id !== id));
-      refreshProgressNotifications();
+      const result = await completeWorkoutOffline(user, workout);
+      if (result.status === "pending") {
+        setOnline(false);
+        await refreshPendingCount();
+        // Not an error — reassure the user it's safely saved.
+        showAlert(
+          "Saved offline",
+          "This workout is saved on your device and will sync automatically when you're back online.",
+          [{ text: "Got it" }]
+        );
+      } else {
+        setOnline(true);
+        refreshProgressNotifications();
+      }
     } catch (error) {
+      // A real server/auth error (not connectivity). Put it back so nothing is lost.
+      setWorkouts(prev => [workout, ...prev]);
       showAlert("Error", error.response?.data?.message || "Failed to complete workout");
     }
   };
@@ -297,7 +450,11 @@ export default function Workout() {
       await api.delete(`/workouts/${id}`);
       setWorkouts(prev => prev.filter(w => w._id !== id));
     } catch (error) {
-      showAlert("Error", error.response?.data?.message || "Failed to delete");
+      if (isOffline(error)) {
+        showAlert("You're offline", "Deleting a routine needs a connection. Try again once you're back online.");
+      } else {
+        showAlert("Error", error.response?.data?.message || "Failed to delete");
+      }
     }
   };
 
@@ -336,7 +493,11 @@ export default function Workout() {
       setWorkouts(prev => [res.data, ...prev]);
       setShowAdd(false);
     } catch (error) {
-      showAlert("Error", error.response?.data?.message || "Failed to save");
+      if (isOffline(error)) {
+        showAlert("You're offline", "Creating a new routine needs a connection. You can still complete your existing workouts offline — they'll sync automatically.");
+      } else {
+        showAlert("Error", error.response?.data?.message || "Failed to save");
+      }
     } finally {
       setSaving(false);
     }
@@ -351,6 +512,9 @@ export default function Workout() {
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Workouts</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+          <TouchableOpacity onPress={() => setShowGuide(true)} hitSlop={8} accessibilityLabel="How the tracker works offline">
+            <Ionicons name="help-circle-outline" size={22} color={COLORS.black} />
+          </TouchableOpacity>
           <TouchableOpacity onPress={() => router.push('/progress')} hitSlop={8} accessibilityLabel="View progress">
             <Ionicons name="stats-chart-outline" size={22} color={COLORS.black} />
           </TouchableOpacity>
@@ -359,6 +523,15 @@ export default function Workout() {
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* SYNC / OFFLINE STATUS — subtle, never alarming */}
+      <SyncBanner
+        online={online}
+        syncing={syncing}
+        justSynced={justSynced}
+        pendingCount={pendingCount}
+        onRetry={runSync}
+      />
 
       {/* WORKOUT LIST */}
       <ScrollView contentContainerStyle={{ padding: 16 }}>
@@ -402,7 +575,7 @@ export default function Workout() {
               {/* complete button */}
               <TouchableOpacity
                 style={styles.completeBtn}
-                onPress={() => completeWorkout(w._id)}
+                onPress={() => completeWorkout(w)}
               >
                 <Ionicons name="checkmark-circle-outline" size={18} color={COLORS.white} />
                 <Text style={styles.completeText}>Mark Complete</Text>
@@ -809,6 +982,47 @@ export default function Workout() {
           </View>
         </View>
       </View>
+      )}
+
+      {/*  OFFLINE GUIDE OVERLAY  */}
+      {showGuide && (
+        <View style={{
+          position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+          zIndex: 80, elevation: 80,
+          backgroundColor: 'rgba(0,0,0,0.4)',
+          justifyContent: 'center', padding: 20,
+        }}>
+          <View style={{ backgroundColor: COLORS.white, borderRadius: 20, padding: 20, maxHeight: '85%' }}>
+            <Text style={{ fontSize: 18, fontWeight: '700', color: COLORS.black, marginBottom: 4 }}>
+              Train offline, sync later
+            </Text>
+            <Text style={{ fontSize: 13, color: COLORS.gray, marginBottom: 14 }}>
+              {"Your Workout Tracker doesn't need the internet."}
+            </Text>
+            <ScrollView style={{ flexGrow: 0 }} showsVerticalScrollIndicator={false}>
+              {OFFLINE_GUIDE_STEPS.map((step) => (
+                <View key={step.title} style={{ flexDirection: 'row', gap: 12, marginBottom: 14 }}>
+                  <View style={{
+                    width: 34, height: 34, borderRadius: 10, backgroundColor: COLORS.inputBackground,
+                    alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    <Ionicons name={step.icon} size={18} color={COLORS.button} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: COLORS.black }}>{step.title}</Text>
+                    <Text style={{ fontSize: 12, lineHeight: 18, color: '#555555', marginTop: 2 }}>{step.text}</Text>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+            <TouchableOpacity
+              style={{ backgroundColor: COLORS.button, borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 6 }}
+              onPress={closeGuide}
+            >
+              <Text style={{ color: COLORS.white, fontSize: 15, fontWeight: '700' }}>Got it</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       )}
     </View>
   );
