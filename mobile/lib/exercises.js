@@ -60,6 +60,7 @@ export const AR_EXERCISES = [
       "Face the camera with your arm clearly visible",
       "Keep your upper arm still — only your forearm moves",
       "Curl all the way up, then fully extend down",
+      "One arm, both arms, or alternating all work — each arm is counted on its own",
     ],
   },
   {
@@ -172,8 +173,9 @@ export const AR_EXERCISES = [
     ],
     tips: [
       "Face the camera with a straight arm",
-      "Raise your arm straight forward to shoulder height",
+      "Raise your arm straight FORWARD to shoulder height — not out to the side or backward",
       "Keep your elbow straight the whole time",
+      "One arm, both arms, or alternating all work — each arm is counted on its own",
     ],
   },
   {
@@ -304,17 +306,18 @@ export const AR_EXERCISES = [
     instructions: [
       "Turn side-on to the camera so your head-to-feet are visible.",
       "Stand tall for a moment so the app can calibrate your upright posture.",
-      "Feet hip-width apart; hinge at the hips with a flat back to lower.",
+      "Feet hip-width apart; bend your knees AND hinge your hips to lower toward the floor with a flat back.",
+      "Lower deep enough that your knees clearly bend — a shallow hip-hinge (RDL) won't count.",
       "Keep the bar close to your body on the way down.",
       "Drive through your heels to stand tall and squeeze your glutes at the top.",
     ],
     tips: [
       "Stand at 45° to your phone — your side should face the camera.",
-      "Feet hip-width apart, bar over mid-foot.",
-      "Hinge at the hips, keep your back flat and chest up.",
-      "Drive through your heels to stand tall — squeeze glutes at the top.",
-      "Lower the bar with control, keeping it close to your body.",
-      "Good lighting and full body in frame helps tracking.",
+      "This is a CONVENTIONAL deadlift: bend your knees and hinge your hips together.",
+      "Lower until your knees are clearly bent — stiff (straight) legs read as an RDL and won't count.",
+      "Keep your back flat and chest up; drive through your heels to stand tall and lock out.",
+      "Don't turn it into a squat — your chest still leans forward over the bar.",
+      "Good lighting and your full body (head to feet) in frame helps tracking.",
     ],
   },
   {
@@ -329,15 +332,17 @@ export const AR_EXERCISES = [
     // AscendAPI: push-up
     ascend: { id: "I4hDWkc" },
     instructions: [
-      "Position side-on at ~45° so your arm and torso are visible.",
-      "Start in a plank with your arms extended.",
+      "Turn your side to the camera — the app needs a side view and won't judge a push-up from the front.",
+      "Start in a plank with your arms extended and your whole body in frame.",
+      "Keep your body in a straight line — don't let your hips sag or pike up.",
       "Lower your chest until your elbows bend to about 90°.",
       "Push back up to full arm extension to count the rep.",
     ],
     tips: [
-      "Position at a 45° angle so your arm is visible",
-      "Lower until your elbows bend to about 90°",
-      "Push back up to full arm extension",
+      "Turn your side to the camera — it can't judge a push-up from the front",
+      "Keep your whole body in frame (head to feet)",
+      "Hold a straight line — don't let your hips sag or pike up",
+      "Lower until your elbows bend to about 90°, then push back up to full extension",
     ],
   },
 ];

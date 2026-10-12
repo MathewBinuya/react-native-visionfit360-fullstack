@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native'
+import { View, Text, TouchableOpacity, ActivityIndicator, TextInput } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useEffect, useRef } from 'react'
 import { useIsFocused } from '@react-navigation/native'
@@ -14,6 +14,8 @@ import { sendHeartbeat } from '../lib/heartbeat'
 import { refreshProgressNotifications } from '../lib/notifications'
 import { useAuthStore } from '../store/authStore'
 import { useAlert } from '../components/AppAlert'
+import { AR_EXERCISES } from '../lib/exercises'
+import { cleanNumber, kgToLb, lbToKg, unitPrefKey } from '../lib/units'
 
 export default function PoseTracker() {
   const insets = useSafeAreaInsets();
@@ -35,6 +37,24 @@ export default function PoseTracker() {
   const [badCount, setBadCount] = useState(0);       // bad-form reps (from the detector)
   const [formGood, setFormGood] = useState(null);    // tracked for analytics; not rendered (border shows form)
   const [saving, setSaving] = useState(false);
+
+  // --- Weight logging (weighted lifts only) -------------------------------
+  // A lift is "weighted" when its catalog entry uses a dumbbell/barbell. Bodyweight
+  // moves (squat, push-up, cardio…) show no weight field, so their view stays unchanged.
+  const exMeta = AR_EXERCISES.find((e) => e.key === exercise);
+  const isWeighted = /dumbbell|barbell/i.test(exMeta?.equipment || "");
+  const [weightUnit, setWeightUnit] = useState("kg"); // honours the user's profile preference ('kg' | 'lb')
+  const [weight, setWeight] = useState("");           // as TYPED, in the display unit (string)
+  const [bestKg, setBestKg] = useState(0);            // personal best (heaviest) — always stored in kg
+  // Always persist metric: convert the typed display value to kg.
+  const weightKg = Math.max(0, Math.round((weightUnit === "lb" ? Number(lbToKg(weight) || 0) : (Number(weight) || 0)) * 10) / 10);
+  const bestDisplay = bestKg > 0 ? (weightUnit === "lb" ? kgToLb(bestKg) : bestKg) : "";
+  const bestKey = `arBestWeight:${user?.id || user?._id || "anon"}:${exercise}`;
+  const STEP = weightUnit === "lb" ? 5 : 2.5;          // common plate increment per unit
+  const bumpWeight = (delta) => {                      // steps the DISPLAYED value in its own unit
+    const next = Math.max(0, Math.round(((Number(weight) || 0) + delta) * 10) / 10);
+    setWeight(next ? String(next) : "");
+  };
 
   // first-use popup — once per account (mirrors the AI Coach guide pattern)
   const [showPopup, setShowPopup] = useState(false);
@@ -74,6 +94,22 @@ export default function PoseTracker() {
       setHtmlUri(asset.localUri || asset.uri);
     })();
   }, []);
+
+  // load this lift's stored personal best (heaviest) + the user's kg/lb preference
+  useEffect(() => {
+    if (!isWeighted) return;
+    (async () => {
+      try {
+        const v = await AsyncStorage.getItem(bestKey);
+        if (v != null) setBestKg(Number(v) || 0);
+      } catch (_e) {}
+      try {
+        const raw = await AsyncStorage.getItem(unitPrefKey(user?.id));
+        const p = raw ? JSON.parse(raw) : null;
+        if (p?.weight === "lb" || p?.weight === "kg") setWeightUnit(p.weight);
+      } catch (_e) {}
+    })();
+  }, [bestKey, isWeighted, user?.id]);
 
   // show the one-time popup (skip silently if storage fails — never block AR)
   useEffect(() => {
@@ -133,16 +169,29 @@ export default function PoseTracker() {
       await api.post("/workouts", {
         title: `${exercise.charAt(0).toUpperCase() + exercise.slice(1)} session (AR)`,
         exercises: [
-          { name: exercise, sets: [{ reps: count, weightKg: 0, goodReps: count, badReps: badCount }] },
+          { name: exercise, sets: [{ reps: count, weightKg, goodReps: count, badReps: badCount }] },
         ],
         completed: true,
         completedAt: new Date(),
       });
       sendHeartbeat(); // workout finish -> mark user active
       refreshProgressNotifications();
-      alert("Saved!", `${count} ${exercise}s recorded.`, [
-        { text: "OK", onPress: () => router.back() },
-      ]);
+
+      // PR = heaviest weight lifted on this exercise. Record it locally for the nudge.
+      const isPR = isWeighted && weightKg > 0 && weightKg > bestKg;
+      if (isPR) {
+        try { await AsyncStorage.setItem(bestKey, String(weightKg)); } catch (_e) {}
+        setBestKg(weightKg);
+      }
+
+      const summary = weightKg > 0
+        ? `${count} reps × ${weight} ${weightUnit} recorded.`
+        : `${count} ${exercise}s recorded.`;
+      alert(
+        isPR ? "New PR! 🏆" : "Saved!",
+        isPR ? `${summary}\nThat's your heaviest ${exercise} yet.` : summary,
+        [{ text: "OK", onPress: () => router.back() }]
+      );
     } catch (error) {
       alert("Error", error.response?.data?.message || "Failed to save");
     } finally {
@@ -194,6 +243,38 @@ export default function PoseTracker() {
           <Text style={styles.counterLabel}>Reps</Text>
           <Text style={styles.counterValue}>{count}</Text>
         </View>
+
+        {/* Weight logger — weighted lifts only, so bodyweight exercises stay uncluttered. */}
+        {isWeighted && (
+          <View style={styles.weightBox}>
+            <Text style={styles.counterLabel}>Weight</Text>
+            <View style={styles.weightRow}>
+              <TouchableOpacity style={styles.stepBtn} onPress={() => bumpWeight(-STEP)} hitSlop={8}>
+                <Text style={styles.stepBtnText}>−</Text>
+              </TouchableOpacity>
+              <TextInput
+                style={styles.weightInput}
+                value={weight}
+                onChangeText={(t) => setWeight(cleanNumber(t, true))}
+                keyboardType="decimal-pad"
+                placeholder="0"
+                placeholderTextColor={COLORS.placeholderText}
+                maxLength={5}
+              />
+              <TouchableOpacity style={styles.stepBtn} onPress={() => bumpWeight(STEP)} hitSlop={8}>
+                <Text style={styles.stepBtnText}>+</Text>
+              </TouchableOpacity>
+            </View>
+            {bestKg > 0 ? (
+              <View style={styles.prPill}>
+                <Ionicons name="trophy-outline" size={11} color="#9A6400" />
+                <Text style={styles.prPillText}>PR {bestDisplay} {weightUnit}</Text>
+              </View>
+            ) : (
+              <Text style={styles.weightUnit}>{weightUnit} · saved to history</Text>
+            )}
+          </View>
+        )}
       </View>
 
       <TouchableOpacity

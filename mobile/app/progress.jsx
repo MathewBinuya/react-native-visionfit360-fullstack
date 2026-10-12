@@ -8,6 +8,7 @@ import styles from '../assets/styles/progress.style'
 import api from '../lib/axios'
 import { shortDate, weekRange, manilaDate, compactKg, formatPct, formatDiff, guideSeenKey } from '../lib/progress'
 import { useAuthStore } from '../store/authStore'
+import { unitPrefKey, LB_TO_KG } from '../lib/units'
 
 const PAST_BAR = "#D9D9D9";
 const LIFTS_PREVIEW = 4;
@@ -17,7 +18,7 @@ const GUIDE_STEPS = [
   {
     icon: "barbell-outline",
     title: "Weekly volume",
-    text: "Total weight you moved in a week (reps × kg, added up across every set). If it rises over the weeks, you're getting stronger.",
+    text: "Total weight you moved in a week (reps × weight, added up across every set). If it rises over the weeks, you're getting stronger.",
   },
   {
     icon: "swap-horizontal-outline",
@@ -37,7 +38,7 @@ const GUIDE_STEPS = [
   {
     icon: "trophy-outline",
     title: "Heaviest lifts & records",
-    text: "Your best weight for each exercise. \"+kg\" shows how much you beat your previous best.",
+    text: "Your best weight for each exercise. The \"+\" figure shows how much you beat your previous best.",
   },
   {
     icon: "chatbubble-ellipses-outline",
@@ -113,6 +114,19 @@ export default function Progress() {
   const [showGuide, setShowGuide] = useState(false);
   const user = useAuthStore((st) => st.user);
   const guideKey = guideSeenKey("progress", user);
+
+  // kg/lb preference (set in Profile). Analytics come back in kg; convert for display only.
+  const [weightUnit, setWeightUnit] = useState("kg");
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(unitPrefKey(user?.id));
+        const p = raw ? JSON.parse(raw) : null;
+        if (p?.weight === "lb" || p?.weight === "kg") setWeightUnit(p.weight);
+      } catch {}
+    })();
+  }, [user?.id]);
+  const uw = (kg) => (weightUnit === "lb" ? Math.round((Number(kg) || 0) / LB_TO_KG) : Math.round(Number(kg) || 0));
 
   // first visit only; reopenable from the header "?" button
   useEffect(() => {
@@ -206,9 +220,9 @@ export default function Progress() {
           <View style={styles.heroRow}>
             <View>
               <Text style={styles.hero}>
-                <Text style={styles.heroFrom}>{compactKg(s.lastWeek.volume)} → </Text>
-                {compactKg(s.thisWeek.volume)}
-                <Text style={styles.heroUnit}> kg</Text>
+                <Text style={styles.heroFrom}>{compactKg(uw(s.lastWeek.volume))} → </Text>
+                {compactKg(uw(s.thisWeek.volume))}
+                <Text style={styles.heroUnit}> {weightUnit}</Text>
               </Text>
               <Text style={styles.caption}>Last week → this week so far</Text>
             </View>
@@ -218,7 +232,7 @@ export default function Progress() {
           {volSelected && (
             <View style={styles.readout}>
               <Text style={styles.readoutText}>
-                {weekRange(volSelected)} · {volSelected.volume.toLocaleString()} kg
+                {weekRange(volSelected)} · {uw(volSelected.volume).toLocaleString()} {weightUnit}
                 {volSel > 0 && weeks[volSel - 1].volume > 0
                   ? ` · ${formatPct(Math.round(((volSelected.volume - weeks[volSel - 1].volume) / weeks[volSel - 1].volume) * 1000) / 10)} vs previous week`
                   : ""}
@@ -281,10 +295,10 @@ export default function Progress() {
                 <View style={styles.recordRow}>
                   <View style={styles.recordTop}>
                     <Text style={styles.recordName}>{pr.exercise}</Text>
-                    <Text style={styles.recordKg}>{pr.weightKg} kg</Text>
+                    <Text style={styles.recordKg}>{uw(pr.weightKg)} {weightUnit}</Text>
                   </View>
                   <Text style={styles.recordSub}>
-                    {manilaDate(pr.date)} · previous best {pr.previousBestKg} kg · +{pr.improvementKg} kg
+                    {manilaDate(pr.date)} · previous best {uw(pr.previousBestKg)} {weightUnit} · +{uw(pr.improvementKg)} {weightUnit}
                   </Text>
                 </View>
               </View>
@@ -297,7 +311,7 @@ export default function Progress() {
           <Text style={[styles.cardTitle, { marginBottom: 4 }]}>HEAVIEST LIFTS</Text>
           {data.records.length === 0 ? (
             <Text style={[styles.muted, { textAlign: "left", marginTop: 6 }]}>
-              Log sets with a weight (kg) in the Workout Tracker to track your heaviest lifts.
+              Log sets with a weight ({weightUnit}) in the Workout Tracker to track your heaviest lifts.
             </Text>
           ) : (
             <>
@@ -307,8 +321,8 @@ export default function Progress() {
                     <Text style={styles.liftName} numberOfLines={1}>{r.exercise}</Text>
                     <Text style={styles.liftSub}>{manilaDate(r.bestDate)}</Text>
                   </View>
-                  {r.improvementKg > 0 && <Text style={styles.liftGain}>+{r.improvementKg} kg</Text>}
-                  <Text style={styles.liftKg}>{r.bestKg} kg</Text>
+                  {r.improvementKg > 0 && <Text style={styles.liftGain}>+{uw(r.improvementKg)} {weightUnit}</Text>}
+                  <Text style={styles.liftKg}>{uw(r.bestKg)} {weightUnit}</Text>
                 </View>
               ))}
               {data.records.length > LIFTS_PREVIEW && (

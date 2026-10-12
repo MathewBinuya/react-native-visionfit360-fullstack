@@ -52,6 +52,26 @@ const styles = StyleSheet.create({
   counterBox: { alignItems: "center" },
   counterLabel: { fontSize: 13, color: COLORS.placeholderText, fontFamily: "GeneralSans-Variable" },
   counterValue: { fontSize: 40, fontWeight: "700", color: COLORS.button, fontFamily: "GeneralSans-Variable" },
+
+  // Weight logger (weighted exercises only) — compact stepper + direct entry.
+  weightBox: { alignItems: "center" },
+  weightRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 2 },
+  stepBtn: {
+    width: 34, height: 34, borderRadius: 17,
+    backgroundColor: COLORS.cards, borderWidth: 1, borderColor: COLORS.border,
+    justifyContent: "center", alignItems: "center",
+  },
+  stepBtnText: { fontSize: 22, lineHeight: 24, fontWeight: "700", color: COLORS.button, fontFamily: "GeneralSans-Variable" },
+  weightInput: {
+    minWidth: 52, paddingVertical: 0, fontSize: 30, fontWeight: "700",
+    color: COLORS.black, textAlign: "center", fontFamily: "GeneralSans-Variable",
+  },
+  weightUnit: { fontSize: 12, color: COLORS.placeholderText, marginTop: 1, fontFamily: "GeneralSans-Variable" },
+  prPill: {
+    flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3,
+    paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, backgroundColor: "#F5A62322",
+  },
+  prPillText: { fontSize: 11, fontWeight: "700", color: "#9A6400", fontFamily: "GeneralSans-Variable" },
   progressText: { fontSize: 16, color: COLORS.placeholderText, fontFamily: "GeneralSans-Variable" },
   postureText: { textAlign: "center", color: COLORS.placeholderText, fontSize: 13, marginBottom: 8, fontFamily: "GeneralSans-Variable" },
   finishBtn: {

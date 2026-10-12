@@ -8,19 +8,36 @@ import styles from '../assets/styles/history.style'
 import api from '../lib/axios'
 import { useAuthStore } from '../store/authStore'
 import { getPendingAsHistory, mergeHistory, onSyncComplete } from '../lib/offlineWorkouts'
+import AsyncStorage from '@react-native-async-storage/async-storage'
+import { kgToLb, unitPrefKey } from '../lib/units'
 
 export default function History() {
   const user = useAuthStore((s) => s.user);
   const [workouts, setWorkouts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [menuWorkout, setMenuWorkout] = useState(null);
+  const [weightUnit, setWeightUnit] = useState("kg"); // mirror the user's kg/lb preference
 
   useEffect(() => {
     loadHistory();
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(unitPrefKey(user?.id));
+        const p = raw ? JSON.parse(raw) : null;
+        if (p?.weight === "lb" || p?.weight === "kg") setWeightUnit(p.weight);
+      } catch (_e) {}
+    })();
     // Refresh once a background sync turns a pending item into a real record.
     const off = onSyncComplete(() => { loadHistory(); });
     return off;
   }, []);
+
+  // weights are stored in kg; show them in the user's chosen unit (0 stays 0, not blank).
+  const showWeight = (kg) => {
+    const n = Number(kg) || 0;
+    if (!n) return 0;
+    return weightUnit === "lb" ? kgToLb(n) : n;
+  };
 
   const loadHistory = async () => {
     // Workouts completed offline live in the pending queue until they sync — show
@@ -148,7 +165,7 @@ export default function History() {
               <View style={styles.volumeBadge}>
                 <Ionicons name="barbell-outline" size={14} color={COLORS.button} />
                 <Text style={styles.volumeText}>
-                  Total volume: {totalVolume(w).toLocaleString()} kg
+                  Total volume: {Number(showWeight(totalVolume(w))).toLocaleString()} {weightUnit}
                 </Text>
               </View>
 
@@ -158,7 +175,7 @@ export default function History() {
                   <Text style={styles.exerciseName}>{ex.name}</Text>
                   {ex.sets?.map((s, si) => (
                     <Text key={si} style={styles.setLine}>
-                      Set {si + 1}: {s.reps || 0} × {s.weightKg || 0} kg
+                      Set {si + 1}: {s.reps || 0} × {showWeight(s.weightKg)} {weightUnit}
                     </Text>
                   ))}
                 </View>

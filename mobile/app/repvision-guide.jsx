@@ -170,13 +170,31 @@ export default function RepVisionGuide() {
           </View>
         )}
 
+        {/* NEW FEATURE — weight logging & personal records (weighted lifts only) */}
+        {/dumbbell|barbell/i.test(ex.equipment || "") && (
+          <View style={styles.tipsBox}>
+            <Text style={styles.tipsHeading}>Tracking your lifts & PRs</Text>
+            {[
+              "Set the weight you're lifting on the tracker with the − / + buttons (or tap to type it).",
+              "On Finish & Save, the set — your reps and weight — is saved to your History.",
+              "Your heaviest set for each exercise becomes a Personal Record (PR); beat it and you'll see a 🏆.",
+              "Weights show in kg or lb — switch the unit in your Profile; your data stays the same.",
+            ].map((t, i) => (
+              <View key={i} style={styles.tipRow}>
+                <View style={styles.bullet} />
+                <Text style={styles.tipText}>{t}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
         {/* shared: setup + what the border colours mean */}
         <View style={styles.tipsBox}>
           <Text style={styles.tipsHeading}>Setup & border colours</Text>
           {[
             "Place your phone at about hip height.",
             "Stand about 2–3 m away so your full body and head are in frame.",
-            "Turn side-on for the deadlift.",
+            "Turn side-on for the deadlift and push-up (a side view is needed to judge them).",
           ].map((t, i) => (
             <View key={i} style={styles.tipRow}>
               <View style={styles.bullet} />
