@@ -143,7 +143,11 @@ body { background: var(--background); color: var(--black); }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes popIn { from { opacity: 0; transform: translateY(6px) scale(0.98); } to { opacity: 1; transform: none; } }
 
-.main { flex: 1; min-width: 0; padding: 32px 40px 56px; background: var(--background); max-width: 1320px; }
+.main { flex: 1; min-width: 0; padding: 32px 40px 56px; background: var(--background); }
+/* Keep content in a comfortable, centered column. The main area fills all the
+   space beside the sidebar, and its content is capped and centered — so wide
+   screens get balanced gutters instead of one big blank area to the side. */
+.main > * { max-width: 1320px; margin-left: auto; margin-right: auto; }
 .page-title { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; color: var(--ink); margin-bottom: 24px; }
 
 /* cards / stats */
