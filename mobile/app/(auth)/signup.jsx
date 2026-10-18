@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, Image, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ActivityIndicator, BackHandler, ScrollView } from 'react-native'
+import { View, Text, StyleSheet, Image, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ActivityIndicator, BackHandler, ScrollView, Modal } from 'react-native'
 import { showAlert } from '../../components/AppAlert'
 import { useState, useEffect } from 'react'
 import { Ionicons } from "@expo/vector-icons"
@@ -244,10 +244,9 @@ const handleSignUp = async () => {
       </View>
     </ScrollView>
 
-    {/*  TERMS & CONDITIONS MODAL  */}
-    {showTerms && (
-      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 80, elevation: 80 }}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+    {/*  TERMS & CONDITIONS — Modal so the dim backdrop covers the whole screen uniformly  */}
+    <Modal visible={showTerms} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setShowTerms(false)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
           <View style={{ backgroundColor: COLORS.white, borderRadius: 20, overflow: 'hidden', width: '100%', maxWidth: 480, maxHeight: '80%' }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: COLORS.border }}>
               <Text style={{ fontSize: 18, fontWeight: '700', color: COLORS.black }}>Terms &amp; Conditions</Text>
@@ -266,8 +265,7 @@ const handleSignUp = async () => {
             </TouchableOpacity>
           </View>
         </View>
-      </View>
-    )}
+    </Modal>
     </KeyboardAvoidingView>
   )
 }

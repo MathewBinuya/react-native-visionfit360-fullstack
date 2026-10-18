@@ -52,6 +52,26 @@ const styles = StyleSheet.create({
   howRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 8 },
   howText: { fontSize: 11, fontWeight: "600", color: COLORS.button, fontFamily: "GeneralSans-Variable" },
   soon: { fontSize: 10, color: COLORS.placeholderText, marginTop: 2, fontFamily: "GeneralSans-Variable" },
+
+  // floating "scroll for more" cue
+  scrollCue: {
+    position: "absolute",
+    bottom: 20,
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: COLORS.button,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  scrollCueText: { fontSize: 12, fontWeight: "600", color: COLORS.white, fontFamily: "GeneralSans-Variable" },
 });
 
 export default styles;

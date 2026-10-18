@@ -29,6 +29,26 @@ const styles = StyleSheet.create({
   },
   row: { flexDirection: "row", gap: 12 },
 
+  // read-only field display (view mode + locked name/bio)
+  readOnlyBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: COLORS.inputBackground,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingHorizontal: 12,
+    minHeight: 48,
+  },
+  readValue: { flex: 1, fontSize: 15, color: COLORS.black, paddingVertical: 12, fontFamily: "GeneralSans-Variable" },
+  // name/bio are permanently read-only — greyed so they clearly read as non-editable
+  readOnlyBoxMuted: { backgroundColor: COLORS.border },
+  readValueMuted: { flex: 1, fontSize: 15, color: COLORS.placeholderText, paddingVertical: 12, fontFamily: "GeneralSans-Variable" },
+  lockedHint: { fontSize: 12, color: COLORS.placeholderText, marginTop: 6, fontFamily: "GeneralSans-Variable" },
+  cancelBtn: { alignItems: "center", justifyContent: "center", paddingVertical: 14, marginTop: 8 },
+  cancelText: { color: COLORS.placeholderText, fontSize: 15, fontWeight: "600", fontFamily: "GeneralSans-Variable" },
+
   // input with a trailing unit suffix (cm / kg / ft / in)
   inputRow: {
     flexDirection: "row",

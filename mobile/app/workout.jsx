@@ -1,8 +1,9 @@
-import { View, Text, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, Keyboard, Platform, BackHandler } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, Keyboard, Platform, BackHandler, Modal } from 'react-native'
 import { showAlert } from '../components/AppAlert'
 import { useState, useEffect, useRef } from 'react'
 import { refreshProgressNotifications } from '../lib/notifications'
 import { router } from 'expo-router'
+import { goBack } from '../lib/nav'
 import { Ionicons } from "@expo/vector-icons"
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import COLORS from "../constants/colors"
@@ -235,7 +236,13 @@ export default function Workout() {
       // or from the local cache when offline. Workouts already completed offline
       // are filtered out so they don't show as still-to-do.
       const { workouts: list, online: isOn } = await loadActiveWorkouts(user);
-      setWorkouts(list);
+      // newest first — invalid/missing dates sort to the bottom
+      const sorted = [...list].sort((a, b) => {
+        const ta = new Date(a.date).getTime() || 0;
+        const tb = new Date(b.date).getTime() || 0;
+        return tb - ta;
+      });
+      setWorkouts(sorted);
       setOnline(isOn);
     } catch (error) {
       console.log("Failed to load workouts", error.message);
@@ -507,7 +514,7 @@ export default function Workout() {
     <View style={styles.container}>
       {/* HEADER */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
+        <TouchableOpacity onPress={() => goBack()}>
           <Ionicons name="arrow-back" size={24} color={COLORS.black} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Workouts</Text>
@@ -585,15 +592,11 @@ export default function Workout() {
         )}
       </ScrollView>
 
-      {/* ── THREE DOTS MENU OVERLAY (was Modal — Modal's separate native window
-           doesn't resize with the keyboard under Android edge-to-edge) ── */}
-      {!!menuWorkout && (
-        <View style={{
-          position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-          zIndex: 50, elevation: 50,
-        }}>
+      {/* ── THREE DOTS MENU — Modal (no text input, so no keyboard concern); the dim
+           backdrop covers the whole screen uniformly ── */}
+      <Modal visible={!!menuWorkout} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setMenuWorkout(null)}>
           <TouchableOpacity
-            style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }}
+            style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' }}
             activeOpacity={1}
             onPress={() => setMenuWorkout(null)}
           >
@@ -646,8 +649,8 @@ export default function Workout() {
               </TouchableOpacity>
             </View>
           </TouchableOpacity>
-        </View>
-      )}
+      </Modal>
+
 
       {/*  EDIT WORKOUT OVERLAY  */}
       {showEdit && (
@@ -984,12 +987,11 @@ export default function Workout() {
       </View>
       )}
 
-      {/*  OFFLINE GUIDE OVERLAY  */}
-      {showGuide && (
+      {/*  OFFLINE GUIDE — Modal so the dim backdrop covers the WHOLE screen uniformly
+           (an in-layout absolute overlay left lighter patches around the system bars) */}
+      <Modal visible={showGuide} transparent animationType="fade" statusBarTranslucent onRequestClose={closeGuide}>
         <View style={{
-          position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-          zIndex: 80, elevation: 80,
-          backgroundColor: 'rgba(0,0,0,0.4)',
+          flex: 1, backgroundColor: 'rgba(0,0,0,0.6)',
           justifyContent: 'center', padding: 20,
         }}>
           <View style={{ backgroundColor: COLORS.white, borderRadius: 20, padding: 20, maxHeight: '85%' }}>
@@ -1023,7 +1025,7 @@ export default function Workout() {
             </TouchableOpacity>
           </View>
         </View>
-      )}
+      </Modal>
     </View>
   );
 }

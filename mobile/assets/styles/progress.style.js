@@ -69,8 +69,8 @@ const styles = StyleSheet.create({
   footnote: { fontSize: 11, color: COLORS.placeholderText, textAlign: "center", alignSelf: "center", marginTop: 4, fontFamily: FONT },
 
   guideOverlay: {
-    position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 50, elevation: 50,
-    backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center", padding: 20,
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", padding: 20,
   },
   guideCard: { backgroundColor: COLORS.white, borderRadius: 20, padding: 20, maxHeight: "85%" },
   guideTitle: { fontSize: 18, fontWeight: "700", color: COLORS.black, fontFamily: FONT, marginBottom: 14 },

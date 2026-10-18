@@ -1,6 +1,7 @@
-import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, RefreshControl, BackHandler } from 'react-native'
+import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, RefreshControl, BackHandler, Modal } from 'react-native'
 import { useState, useCallback, useEffect } from 'react'
-import { router, useFocusEffect } from 'expo-router'
+import { useFocusEffect } from 'expo-router'
+import { goBack } from '../lib/nav'
 import { Ionicons } from "@expo/vector-icons"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import COLORS from "../constants/colors"
@@ -344,7 +345,7 @@ export default function Progress() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={10}>
+        <TouchableOpacity onPress={() => goBack()} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color={COLORS.black} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Progress</Text>
@@ -359,7 +360,8 @@ export default function Progress() {
         {renderBody()}
       </ScrollView>
 
-      {showGuide && (
+      {/* Modal so the dim backdrop covers the whole screen uniformly (no lighter patches) */}
+      <Modal visible={showGuide} transparent animationType="fade" statusBarTranslucent onRequestClose={closeGuide}>
         <View style={styles.guideOverlay}>
           <View style={styles.guideCard}>
             <Text style={styles.guideTitle}>How to read your progress</Text>
@@ -381,7 +383,7 @@ export default function Progress() {
             </TouchableOpacity>
           </View>
         </View>
-      )}
+      </Modal>
     </View>
   );
 }

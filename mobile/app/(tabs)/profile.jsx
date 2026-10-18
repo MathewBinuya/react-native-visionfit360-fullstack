@@ -1,6 +1,6 @@
 import { View, Text, TextInput, TouchableOpacity, ScrollView, Image, ActivityIndicator, RefreshControl } from 'react-native'
-import { useState, useEffect } from 'react'
-import { router } from 'expo-router'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { router, useFocusEffect } from 'expo-router'
 import { Ionicons } from "@expo/vector-icons"
 import * as ImagePicker from "expo-image-picker"
 import AsyncStorage from '@react-native-async-storage/async-storage'
@@ -14,8 +14,6 @@ import {
   MIN_HEIGHT_CM, MAX_HEIGHT_CM, MIN_WEIGHT_KG, MAX_WEIGHT_KG,
 } from '../../lib/units'
 
-const sanitizeName = (text) => text.replace(/[^a-zA-Z\s]/g, '');
-
 export default function Profile() {
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
@@ -27,6 +25,9 @@ export default function Profile() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [editing, setEditing] = useState(false); // read-only until "Edit Profile" is tapped
+  const editingRef = useRef(false);
+  useEffect(() => { editingRef.current = editing; }, [editing]);
 
   // canonical metric values (what we send)
   const [metricHeight, setMetricHeight] = useState("");
@@ -42,6 +43,20 @@ export default function Profile() {
   useEffect(() => {
     init();
   }, []);
+
+  // Leaving the Profile tab (bottom nav) exits edit mode and discards any unsaved
+  // edits, so coming back shows the read-only view and the user must tap "Edit
+  // Profile" again. The tab screen stays mounted on switch, so we reset on blur.
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        if (editingRef.current) {
+          setEditing(false);
+          loadProfile();   // restore saved values (drop unsaved height/weight edits)
+        }
+      };
+    }, [])
+  );
 
   const init = async () => {
     let hUnit = "cm", wUnit = "kg";
@@ -140,6 +155,7 @@ export default function Profile() {
       });
 
       await loadProfile();
+      setEditing(false);
       alert("Saved", "Profile updated");
     } catch (error) {
       alert("Error", error.response?.data?.message || "Failed to save");
@@ -147,6 +163,33 @@ export default function Profile() {
       setSaving(false);
     }
   };
+
+  // confirm before entering edit mode (so a stray tap doesn't open the editor)
+  const confirmEdit = () => {
+    alert(
+      "Edit profile",
+      "Do you want to edit your profile?",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Edit", onPress: () => setEditing(true) },
+      ],
+      { cancelable: true }
+    );
+  };
+
+  // leave edit mode without saving — revert any unsaved height/weight edits
+  const cancelEdit = async () => {
+    setEditing(false);
+    await loadProfile();
+  };
+
+  // read-only display strings (shown in view mode and for the locked fields)
+  const heightDisplay = heightUnit === "ft"
+    ? (ftVal || inVal ? `${ftVal || 0} ft ${inVal || 0} in` : "—")
+    : (metricHeight ? `${metricHeight} cm` : "—");
+  const weightDisplay = weightUnit === "lb"
+    ? (lbVal ? `${lbVal} lb` : "—")
+    : (metricWeight ? `${metricWeight} kg` : "—");
 
   const pickAndUploadPhoto = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -240,44 +283,41 @@ export default function Profile() {
             </Text>
           </View>
         )}
-        <TouchableOpacity onPress={pickAndUploadPhoto} style={styles.changePhotoBtn}>
-          <Ionicons name="camera-outline" size={16} color={COLORS.button} />
-          <Text style={styles.changePhotoText}>Change photo</Text>
-        </TouchableOpacity>
+        {/* photo is only changeable while editing */}
+        {editing && (
+          <TouchableOpacity onPress={pickAndUploadPhoto} style={styles.changePhotoBtn}>
+            <Ionicons name="camera-outline" size={16} color={COLORS.button} />
+            <Text style={styles.changePhotoText}>Change photo</Text>
+          </TouchableOpacity>
+        )}
         <Text style={styles.usernameText}>@{user?.name || user?.username}</Text>
       </View>
 
-      {/* Name */}
+      {/* Name — not editable (greyed to read as locked, no lock icon) */}
       <Text style={styles.label}>Name</Text>
-      <View style={styles.inputContainer}>
-        <TextInput
-          style={styles.input}
-          placeholder="Your name"
-          placeholderTextColor={COLORS.placeholderText}
-          value={form.name}
-          onChangeText={(t) => setForm({ ...form, name: sanitizeName(t) })}
-        />
+      <View style={[styles.readOnlyBox, styles.readOnlyBoxMuted]}>
+        <Text style={styles.readValueMuted}>{form.name || "—"}</Text>
       </View>
 
-      {/* Bio */}
+      {/* Bio — not editable (greyed) */}
       <Text style={styles.label}>Bio</Text>
-      <View style={styles.inputContainer}>
-        <TextInput
-          style={[styles.input, { height: 60 }]}
-          placeholder="About you"
-          placeholderTextColor={COLORS.placeholderText}
-          value={form.bio}
-          onChangeText={(t) => setForm({ ...form, bio: t })}
-          multiline
-        />
+      <View style={[styles.readOnlyBox, styles.readOnlyBoxMuted]}>
+        <Text style={styles.readValueMuted}>{form.bio || "—"}</Text>
       </View>
+      {editing && (
+        <Text style={styles.lockedHint}>Name and bio can’t be changed.</Text>
+      )}
 
       {/* Height */}
       <View style={styles.labelRow}>
         <Text style={styles.label}>Height</Text>
-        <UnitToggle units={["cm", "ft"]} active={heightUnit} onPick={toggleHeightUnit} />
+        {editing && <UnitToggle units={["cm", "ft"]} active={heightUnit} onPick={toggleHeightUnit} />}
       </View>
-      {heightUnit === "cm" ? (
+      {!editing ? (
+        <View style={styles.readOnlyBox}>
+          <Text style={styles.readValue}>{heightDisplay}</Text>
+        </View>
+      ) : heightUnit === "cm" ? (
         <View style={styles.inputRow}>
           <TextInput
             style={styles.input}
@@ -322,28 +362,46 @@ export default function Profile() {
       {/* Weight */}
       <View style={styles.labelRow}>
         <Text style={styles.label}>Weight</Text>
-        <UnitToggle units={["kg", "lb"]} active={weightUnit} onPick={toggleWeightUnit} />
+        {editing && <UnitToggle units={["kg", "lb"]} active={weightUnit} onPick={toggleWeightUnit} />}
       </View>
-      <View style={styles.inputRow}>
-        <TextInput
-          style={styles.input}
-          placeholder={weightUnit === "kg" ? "70" : "154"}
-          placeholderTextColor={COLORS.placeholderText}
-          value={weightUnit === "kg" ? metricWeight : lbVal}
-          onChangeText={weightUnit === "kg" ? onWeightKg : onLb}
-          keyboardType="numeric"
-          maxLength={6}
-        />
-        <Text style={styles.unitSuffix}>{weightUnit}</Text>
-      </View>
+      {!editing ? (
+        <View style={styles.readOnlyBox}>
+          <Text style={styles.readValue}>{weightDisplay}</Text>
+        </View>
+      ) : (
+        <View style={styles.inputRow}>
+          <TextInput
+            style={styles.input}
+            placeholder={weightUnit === "kg" ? "70" : "154"}
+            placeholderTextColor={COLORS.placeholderText}
+            value={weightUnit === "kg" ? metricWeight : lbVal}
+            onChangeText={weightUnit === "kg" ? onWeightKg : onLb}
+            keyboardType="numeric"
+            maxLength={6}
+          />
+          <Text style={styles.unitSuffix}>{weightUnit}</Text>
+        </View>
+      )}
 
-      <TouchableOpacity
-        style={[styles.saveBtn, saving && { opacity: 0.6 }]}
-        onPress={saveProfile}
-        disabled={saving}
-      >
-        <Text style={styles.saveText}>{saving ? "Saving..." : "Save changes"}</Text>
-      </TouchableOpacity>
+      {editing ? (
+        <>
+          <TouchableOpacity
+            style={[styles.saveBtn, saving && { opacity: 0.6 }]}
+            onPress={saveProfile}
+            disabled={saving}
+          >
+            <Text style={styles.saveText}>{saving ? "Saving..." : "Save changes"}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.cancelBtn} onPress={cancelEdit} disabled={saving}>
+            <Text style={styles.cancelText}>Cancel</Text>
+          </TouchableOpacity>
+        </>
+      ) : (
+        <TouchableOpacity style={[styles.saveBtn, { flexDirection: "row" }]} onPress={confirmEdit}>
+          <Ionicons name="create-outline" size={18} color={COLORS.white} />
+          <Text style={[styles.saveText, { marginLeft: 6 }]}>Edit Profile</Text>
+        </TouchableOpacity>
+      )}
 
       {/* Feedback — opens the feedback screen (owned by the feedback feature) */}
       <TouchableOpacity style={styles.rowBtn} onPress={() => router.push('/feedback')}>
