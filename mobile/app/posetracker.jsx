@@ -3,6 +3,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useEffect, useRef } from 'react'
 import { useIsFocused } from '@react-navigation/native'
 import { router, useLocalSearchParams } from 'expo-router'
+import { goBack } from '../lib/nav'
 import { WebView } from 'react-native-webview'
 import { Asset } from 'expo-asset'
 import AsyncStorage from '@react-native-async-storage/async-storage'
@@ -147,7 +148,7 @@ export default function PoseTracker() {
         alert(
           "Camera unavailable",
           data.message || "Something went wrong starting the camera.",
-          [{ text: "Go back", onPress: () => router.back() }]
+          [{ text: "Go back", onPress: () => goBack() }]
         );
       }
       // 'countdown', 'ar_started', 'dl_*' are received but intentionally not shown as text.
@@ -190,7 +191,7 @@ export default function PoseTracker() {
       alert(
         isPR ? "New PR! 🏆" : "Saved!",
         isPR ? `${summary}\nThat's your heaviest ${exercise} yet.` : summary,
-        [{ text: "OK", onPress: () => router.back() }]
+        [{ text: "OK", onPress: () => goBack() }]
       );
     } catch (error) {
       alert("Error", error.response?.data?.message || "Failed to save");
@@ -206,7 +207,7 @@ export default function PoseTracker() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={10}>
+        <TouchableOpacity onPress={() => goBack()} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color={COLORS.black} />
         </TouchableOpacity>
         {/* "How to do it" — opens the demo + instructions for this exact exercise */}

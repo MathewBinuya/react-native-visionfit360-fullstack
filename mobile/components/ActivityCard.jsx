@@ -230,7 +230,7 @@ const styles = StyleSheet.create({
   legendCell: { width: 8, height: 8, borderRadius: 2 },
   legendText: { fontSize: 9, color: COLORS.placeholderText, fontFamily: FONT, marginHorizontal: 2 },
 
-  guideOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center", padding: 20 },
+  guideOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", padding: 20 },
   guideCard: { backgroundColor: COLORS.white, borderRadius: 20, padding: 20, maxHeight: "85%" },
   guideTitle: { fontSize: 18, fontWeight: "700", color: COLORS.black, fontFamily: FONT, marginBottom: 14 },
   guideRow: { flexDirection: "row", gap: 12, marginBottom: 14 },

@@ -1,6 +1,7 @@
 import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, useWindowDimensions } from 'react-native'
 import { useState, useEffect, useCallback } from 'react'
 import { router, useLocalSearchParams } from 'expo-router'
+import { goBack } from '../lib/nav'
 import { Image } from 'expo-image'
 import { Ionicons } from "@expo/vector-icons"
 import COLORS from "../constants/colors"
@@ -54,14 +55,14 @@ export default function RepVisionGuide() {
   const onStart = () => {
     // Opened from the AR screen → go BACK to the existing session (never spawn a
     // second AR instance). Opened from the exercise list → push the tracker.
-    if (openedFromAr) router.back();
+    if (openedFromAr) goBack();
     else router.push(`/posetracker?exercise=${ex.key}`);
   };
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={10}>
+        <TouchableOpacity onPress={() => goBack()} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color={COLORS.black} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>How to do it</Text>
@@ -82,7 +83,7 @@ export default function RepVisionGuide() {
           <Ionicons name={ex.icon} size={48} color={COLORS.button} />
         </View>
         <Text style={styles.title}>{ex.label}</Text>
-        <Text style={styles.group}>{ex.group} · Target: {ex.targetReps} reps</Text>
+        <Text style={styles.group}>{ex.group}</Text>
 
         {/* equipment */}
         {!!ex.equipment && (

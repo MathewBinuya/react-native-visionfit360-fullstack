@@ -1,4 +1,4 @@
-import { View, Text, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator, BackHandler, Share } from 'react-native'
+import { View, Text, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator, BackHandler, Share, Modal } from 'react-native'
 import { showAlert } from '../../components/AppAlert'
 import { useState, useEffect, useRef } from 'react'
 import { Ionicons } from "@expo/vector-icons"
@@ -230,11 +230,10 @@ export default function AICoach() {
         )}
       </ScrollView>
 
-      {/*  THREE DOTS MENU OVERLAY (now opened via long-press)  */}
-      {!!menuMessage && (
-        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 50, elevation: 50 }}>
+      {/*  THREE DOTS MENU — Modal so the dim backdrop covers the whole screen uniformly  */}
+      <Modal visible={!!menuMessage} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setMenuMessage(null)}>
           <TouchableOpacity
-            style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }}
+            style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' }}
             activeOpacity={1}
             onPress={() => setMenuMessage(null)}
           >
@@ -275,13 +274,12 @@ export default function AICoach() {
               </TouchableOpacity>
             </View>
           </TouchableOpacity>
-        </View>
-      )}
+      </Modal>
 
-      {/*  FIRST-TIME GUIDE (auto-shows once per account, reopenable via the ? icon)  */}
-      {showGuide && !initialLoading && (
-        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 90, elevation: 90 }}>
-          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+
+      {/*  FIRST-TIME GUIDE — Modal so the dim backdrop covers the whole screen uniformly  */}
+      <Modal visible={showGuide && !initialLoading} transparent animationType="fade" statusBarTranslucent onRequestClose={dismissGuide}>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
             <View style={{ backgroundColor: COLORS.white, borderRadius: 20, padding: 24, width: '100%', maxWidth: 400 }}>
               <View style={{ alignItems: 'center', marginBottom: 16 }}>
                 <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: COLORS.button, justifyContent: 'center', alignItems: 'center', marginBottom: 12 }}>
@@ -314,8 +312,7 @@ export default function AICoach() {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
-      )}
+      </Modal>
 
       {/* input */}
       <View style={styles.inputBar}>

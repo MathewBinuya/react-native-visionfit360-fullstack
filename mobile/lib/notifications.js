@@ -1,6 +1,7 @@
 import * as Notifications from "expo-notifications";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import api from "./axios";
+import { setPlanned, logNotification } from "./notifInbox";
 
 // updated handler (new API: shouldShowBanner / shouldShowList instead of shouldShowAlert)
 Notifications.setNotificationHandler({
@@ -169,12 +170,19 @@ export const requestPermission = async () => {
 export const scheduleProgressNotifications = async (analytics) => {
   const data = analytics === undefined ? await fetchAnalytics() : analytics;
   await Notifications.cancelAllScheduledNotificationsAsync();
-  for (const slot of buildSchedule(data)) {
+  const schedule = buildSchedule(data);
+  for (const slot of schedule) {
     await Notifications.scheduleNotificationAsync({
       content: slot.content,
       trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: slot.at },
     });
   }
+  // Record the plan so the in-app inbox (bell) can show each reminder once its time passes.
+  try {
+    await setPlanned(schedule.map((s) => ({
+      id: s.kind + "_" + s.at, title: s.content.title, body: s.content.body, at: s.at,
+    })));
+  } catch (_e) {}
 };
 
 let refreshing = null;
@@ -206,8 +214,11 @@ export const cancelAllNotifications = async () => {
 // Shows what the next reminder would say right now, from real progress when available.
 export const sendTestNotification = async () => {
   const next = buildSchedule(await fetchAnalytics())[0];
+  const content = next?.content || { title: "Test notification ✅", body: randomQuote() };
   await Notifications.scheduleNotificationAsync({
-    content: next?.content || { title: "Test notification ✅", body: randomQuote() },
+    content,
     trigger: null,   // this is just for test only
   });
+  // also drop it into the in-app inbox right away
+  try { await logNotification({ title: content.title, body: content.body, at: Date.now() }); } catch (_e) {}
 };

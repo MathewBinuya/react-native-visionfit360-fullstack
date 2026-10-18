@@ -96,6 +96,13 @@
     const params = new URLSearchParams(window.location.search);
     const exercise = params.get('exercise') || 'squat';
 
+    // ---- ARM SELECTOR (bicep curl / front raise / lateral raise) ----
+    // ?arm=left or ?arm=right restricts counting + feedback to that arm only; default
+    // 'either' tracks both. A disabled arm is treated as not visible and never advanced,
+    // so it can't count, pair, or turn the border red.
+    const ARM_SEL = ['left', 'right'].includes(params.get('arm')) ? params.get('arm') : 'either';
+    function armEnabled(side) { return ARM_SEL === 'either' || ARM_SEL === side; }
+
     // ---- A/B SWITCHES (override from the page URL) ----
     const USE_WORLD_ANGLES = params.get('angles') !== '2d';        // 3D joint angles (&angles=2d = image-pixel angles)
     const USE_BODY_SCALE   = params.get('scale')  !== '0';         // body-relative pixel thresholds (&scale=0 = fixed pixels)
@@ -862,17 +869,16 @@
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { dlSaveFrames(); dlSaveRows(); } });
 
     /* =========================================================================
-       BICEP CURL — BOTH-ARMS-ONLY, built on two per-arm state machines.
+       BICEP CURL — EITHER-ARM, built on two per-arm state machines.
        The left and right arms are tracked as two independent rep state machines
        (curl phase down -> curling -> up -> lowering, elbow angle, deepest-curl
-       extreme, per-rep form evidence, debounce, gap-reset). A rep COUNTS ONLY when
-       BOTH arms curl together: each arm records its completion and resolveBothArm
-       counts/rejects once when the other arm also just completed an OVERLAPPING curl
-       (see resolveBothArm). A single-arm or alternating curl forms no pair and is
-       dropped silently — it does NOT count. This bypasses the single-track global R
-       engine on purpose (R is one state machine; bicep needs two) while reusing the
-       shared rep()/badRep()/setForm() plumbing so counting, the AR border and the
-       verdict flash behave exactly like every other exercise.
+       extreme, per-rep form evidence, debounce, gap-reset). Each arm counts on its
+       OWN via the shared per-limb finishLimb(): a single arm counts alone, and two
+       arms that START together pair into ONE rep (bad if either arm was bad). This
+       bypasses the single-track global R engine on purpose (R is one state machine;
+       bicep needs two) while reusing the shared rep()/badRep()/setForm() plumbing so
+       counting, the AR border and the verdict flash behave exactly like every other
+       exercise.
        ========================================================================= */
     const CURL = {
       enter: 110,        // elbow angle (shoulder-elbow-wrist) below this => arm is curling (active)
@@ -898,7 +904,9 @@
         active: false, phase: 'down', activeStart: 0, activeFrames: 0,
         extreme: 180, peakAt: 0, upperArmMax: 0, evalFrames: 0, badFrames: 0, partialUp: false, bounceUntil: 0,
         lastRepMs: 0, lastSeenMs: 0,
+        armed: false,   // a curl may only START after the arm was seen straight (extended) first
         finStart: 0, finEnd: 0, finPeak: 0, finOk: true, finReason: '', finValid: false, finPaired: false,
+        pending: false, lastCountMs: 0,   // used by the shared per-limb finishLimb/flushPending
       };
     }
     const curlArms = { left: makeCurlArm(), right: makeCurlArm() };
@@ -907,16 +915,10 @@
       a.extreme = 180; a.peakAt = 0; a.upperArmMax = 0; a.evalFrames = 0; a.badFrames = 0; a.partialUp = false;
     }
 
-    // BOTH-ARMS-ONLY rep resolution (bicep curl, front raise, lateral raise).
-    // These exercises count a rep ONLY when BOTH arms perform the movement together — single-arm
-    // and alternating reps are intentionally NOT counted (per the user's request). Each arm, when
-    // it completes, records its OWN verdict (ok + reason) via recordArmFinish and then DEFERS to
-    // resolveBothArm: a rep is counted/rejected exactly once, only when the other arm also just
-    // completed a movement whose active window OVERLAPPED this one's and finished within ARM_PAIR_MS.
-    // A lone arm's completion forms no pair and is dropped silently (no count, no bad rep, no flash).
-    // NOTE: the earlier peak-TIME proximity test was removed — peakAt jittered during a hold at the
-    // top/bottom, so genuine both-arm reps failed to pair and were dropped. Window overlap + recency
-    // is the reliable "both arms moved together" signal (and single-arm still never pairs).
+    // LEGACY both-arms-only rep resolution. Bicep curl, front raise AND lateral raise now count
+    // EITHER arm via the shared per-limb finishLimb()/flushPending(), so this path is no longer
+    // used by them; it is kept only for the finishRaise else-branch (any raise config WITHOUT
+    // mode:'either'). Left in place so a future both-arms-only exercise can reuse it.
     const ARM_PAIR_MS = 1200;       // the other arm must have completed within this of this one (was 700)
     const bothRepLast = {};         // per-exercise debounce (keyed) for a counted both-arm rep
     function recordArmFinish(a, startMs, endMs, ok, reason) {
@@ -937,10 +939,11 @@
     }
 
     // Finish an in-progress curl on `side` (elbow extended again). Computes THIS arm's verdict
-    // (deep enough + form) and defers to resolveBothArm — a rep counts only with the other arm.
+    // (deep enough + form) and defers to the shared per-limb finishLimb — a single arm counts
+    // alone, two arms that started together pair into ONE rep.
     function finishCurl(side) {
       const a = curlArms[side];
-      const startMs = a.activeStart, endMs = NOW;
+      const startMs = a.activeStart;
       a.active = false; a.phase = 'down'; a.partialUp = false;
       if (a.activeFrames < CURL.minActiveFrames) return;      // too short to be a real completion: ignore
       let ok = true, reason = '';
@@ -951,8 +954,7 @@
         const badRatio = a.evalFrames ? a.badFrames / a.evalFrames : 0;
         if (a.evalFrames >= CURL.minEvalFrames && badRatio > CURL.badRatio) { ok = false; reason = 'Keep your ' + side + ' elbow stable'; }
       }
-      recordArmFinish(a, startMs, endMs, ok, reason);
-      resolveBothArm(curlArms, side, CURL.pairMs, CURL.debounceMs, 'curl');
+      finishLimb(curlArms, side, startMs, ok, reason, { pair: true, debounceMs: CURL.debounceMs });
     }
 
     // Advance ONE arm's state machine for this frame. `bodySway` is the shared
@@ -974,7 +976,9 @@
       const frameBad = swingBad || bodySway;                   // body english counts against the curling arm
 
       if (!a.active) {
-        if (elbowAngle < CURL.enter) {                         // DOWN -> start CURLING
+        if (elbowAngle > CURL.exit) a.armed = true;            // arm was straight -> next curl may start
+        if (a.armed && elbowAngle < CURL.enter) {              // DOWN -> start CURLING (only from a straight arm)
+          a.armed = false;
           a.active = true; a.phase = 'up'; a.activeStart = NOW; a.activeFrames = 1;
           a.extreme = elbowAngle; a.peakAt = NOW; a.upperArmMax = swingEvaluable ? swing : 0;
           a.evalFrames = 1; a.badFrames = frameBad ? 1 : 0; a.partialUp = false;
@@ -996,8 +1000,9 @@
        FRONT RAISE & LATERAL RAISE — SHARED INDEPENDENT PER-ARM ENGINE
        Like the bicep engine, the left and right arms are tracked as two fully
        independent rep state machines (elevation angle, movement direction, phase,
-       form evidence, debounce, gap-reset). A rep counts ONLY when BOTH arms raise
-       together (see resolveBothArm): a single arm or an alternating raise is ignored.
+       form evidence, debounce, gap-reset). Both exercises count EITHER arm (mode:'either'
+       → finishLimb + flushPending): a single arm counts on its own, and two arms that
+       START together count as ONE rep. ?arm=left|right restricts to one arm.
        (The OLD single-track lateral raise used one averaged both-arms angle, which
        could not judge the arms independently at all.)
 
@@ -1110,6 +1115,9 @@
       minDirFrames: 3,
       debounceMs: 300, minActiveFrames: 2,
       maxActiveMs: 6000, bodySwayPx: 55, pairMs: ARM_PAIR_MS,
+      // EITHER-arm counting (per-limb engine): one arm counts alone; two arms that start together
+      // pair into ONE rep. finishRaise routes mode:'either' to finishLimb.
+      mode: 'either',
     };
     const LAT = {
       key: 'lr', validDir: 'lateral', up: 50, down: 28, target: 70,
@@ -1117,6 +1125,9 @@
       minDirFrames: 3,
       debounceMs: 300, minActiveFrames: 2,
       maxActiveMs: 6000, bodySwayPx: 55, pairMs: ARM_PAIR_MS,
+      // EITHER-ARM counting (per-limb engine): counts on whichever arm raises. Two arms
+      // that start together pair into ONE rep; a lone arm counts via flushPending(latArms).
+      mode: 'either',
     };
     function makeRaiseArm() {
       return {
@@ -1128,6 +1139,7 @@
         partialDown: false, bounceUntil: 0,
         lastRepMs: 0, lastSeenMs: 0,
         finStart: 0, finEnd: 0, finOk: true, finReason: '', finValid: false, finPaired: false,
+        pending: false, lastCountMs: 0,   // used by the shared per-limb finishLimb/flushPending (front + lateral raise)
       };
     }
     const fraiseArms = { left: makeRaiseArm(), right: makeRaiseArm() };   // front raise
@@ -1136,6 +1148,7 @@
       a.active = false; a.phase = 'down'; a.activeStart = 0; a.activeFrames = 0; a.extreme = 0;
       a.upperArmMax = 0; a.upperArmSeen = false; a.dirJudged = 0;
       a.faultSince = 0; a.faultRunMax = 0; a.faultReason = ''; a.faultReasonSus = ''; a.partialDown = false;
+      a.pending = false;
     }
 
     // Live per-frame message for a wrong-direction frame (dir is THIS frame's wrong direction).
@@ -1148,8 +1161,10 @@
                                : "Don't swing your " + side + ' arm backward';
     }
 
-    // Finish an in-progress raise on `side`, and defer to resolveBothArm — a rep counts only when
-    // BOTH arms raised together. Rejections, in order:
+    // Finish an in-progress raise on `side`. A config with mode:'either' (front + lateral raise)
+    // goes through finishLimb — EITHER arm counts, and two arms that start together count as ONE
+    // rep; the resolveBothArm branch below is only for a config WITHOUT mode:'either'. Rejections,
+    // in order:
     //   incomplete elevation (didn't reach shoulder height) -> curl-not-raise identity ->
     //   direction unverifiable (ignore) -> a SUSTAINED fault (same signal that turned the border red).
     // Using the sustained-fault run (not a frame ratio) makes red agree with the count: any fault that
@@ -1168,8 +1183,14 @@
       else if (a.faultRunMax >= RAISE_FAULT_MS) {             // a fault was sustained long enough to show red
         ok = false; reason = a.faultReasonSus || 'Fix your ' + side + ' arm form';
       }
-      recordArmFinish(a, startMs, endMs, ok, reason);
-      resolveBothArm(arms, side, C.pairMs, C.debounceMs, C.key);   // count only with the other arm
+      if (C.mode === 'either') {
+        // front + lateral raise: per-limb engine — pairs two arms that started together into ONE
+        // rep, else counts a single arm alone (via flushPending). Partner verdict is honoured.
+        finishLimb(arms, side, startMs, ok, reason, { pair: true, debounceMs: C.debounceMs });
+      } else {
+        recordArmFinish(a, startMs, endMs, ok, reason);
+        resolveBothArm(arms, side, C.pairMs, C.debounceMs, C.key);   // legacy both-arms-only path (unused: front + lateral raise use mode:'either')
+      }
     }
 
     // Advance ONE arm's raise state machine for this frame. `bodySway` is the shared torso-swing
@@ -1234,6 +1255,131 @@
       const faultLive = a.active && a.faultSince && (NOW - a.faultSince >= RAISE_FAULT_MS);
       return { visible: true, armAngle, elbowAngle: Math.round(elbowAngle), dir, dirBad, elbowBad, tooHigh,
                active: a.active, faultLive, faultReason: a.faultReason };
+    }
+
+    /* =========================================================================
+       INDEPENDENT PER-LIMB REP ENGINE (tricep extension, side leg raise, high knees,
+       and the EITHER-arm bicep curl, front raise and lateral raise)
+       Each limb (left/right) runs its OWN rep state machine. A finished rep either
+       counts alone or, for two-limb-together movements (pair:true), pairs with the
+       OPPOSITE limb into a single rep — using per-limb START times, not one shared
+       merge timer (the old countEither cascaded and swallowed reps on fast
+       alternation, and one side could eat the other's rep).
+       Missing-landmark handling is tolerant: a limb is only abandoned after a real
+       POSE_GAP_MS dropout (not a single flickered frame), and a lower visibility gate
+       (kpL) keeps far-side limbs usable — that is what fixes "only left counts".
+       ========================================================================= */
+    // Lower visibility gate than kp() (0.5) — a far-side limb turned from the camera
+    // often reads 0.3–0.5 and must still be usable for counting.
+    const LIMB_MIN_VIS = 0.3;
+    function kpL(keypoints, name) {
+      const k = keypoints.find((k) => k.name === name);
+      if (!k) return undefined;
+      if (COUNT_MIN_VIS && (k.score ?? 1) < LIMB_MIN_VIS) return undefined;   // ?gate=0 disables the gate
+      return k;
+    }
+
+    const PAIR_START_MS = 450;    // two limbs that STARTED within this are one both-limb rep
+    const PAIR_WAIT_MS  = 1500;   // a pending limb waits at most this for its partner, then counts alone
+
+    function makeLimb() {
+      return {
+        stage: 'ready', activeStart: 0, activeFrames: 0, evalFrames: 0, badFrames: 0,
+        extreme: null, lastSeenMs: 0, lastCountMs: 0,
+        pending: false, finStart: 0, finEnd: 0, finOk: true, finReason: '',
+      };
+    }
+    const triArms = { left: makeLimb(), right: makeLimb() };   // tricep extension
+    const slrLegs = { left: makeLimb(), right: makeLimb() };   // side leg raise
+    const hkLegs  = { left: makeLimb(), right: makeLimb() };   // high knees
+
+    // Active-ness that works for BOTH per-limb states (`stage`) and the raise-arm
+    // objects (`active` boolean), so finishLimb/flushPending serve the lateral raise too.
+    function limbActive(x) { return x.stage === 'active' || x.active === true; }
+
+    // Abandon an in-progress rep (no count, no bad rep). Used by the no-person gap
+    // branch and by sideMissing.
+    function abandonSideRep(st) { if (st && st.stage === 'active') { st.stage = 'ready'; st.extreme = null; st.pending = false; } }
+
+    // A limb whose landmarks are missing THIS frame: keep its rep alive through brief
+    // dropout; only abandon once it's been gone longer than POSE_GAP_MS.
+    function sideMissing(st) {
+      if (st.stage === 'active' && st.lastSeenMs && NOW - st.lastSeenMs > POSE_GAP_MS) abandonSideRep(st);
+    }
+
+    // Count a finished limb rep, pairing opposite limbs that STARTED together into ONE rep.
+    function finishLimb(limbs, side, startMs, ok, reason, opts) {
+      const a = limbs[side], o = limbs[side === 'left' ? 'right' : 'left'];
+      opts = opts || {};
+      const debounceMs = opts.debounceMs || 300;
+      if (NOW - (a.lastCountMs || 0) < debounceMs) return;      // per-limb debounce
+      if (opts.pair) {
+        const startedTogether = o.activeStart && Math.abs(startMs - o.activeStart) <= PAIR_START_MS;
+        if (startedTogether) {
+          if (o.pending) {                                       // partner already finished → ONE rep
+            o.pending = false;
+            a.lastCountMs = o.lastCountMs = NOW;
+            if (ok && o.finOk) rep(); else badRep(ok ? o.finReason : reason);
+            return;
+          }
+          if (limbActive(o)) {                                   // partner still moving → wait for it
+            a.pending = true; a.finStart = startMs; a.finEnd = NOW; a.finOk = ok; a.finReason = reason;
+            return;
+          }
+        }
+      }
+      a.lastCountMs = NOW;                                       // count this limb alone
+      if (ok) rep(); else badRep(reason);
+    }
+
+    // Every frame: a pending limb counts alone once its partner is no longer active
+    // (it never started a matching rep), or after PAIR_WAIT_MS (partner never came).
+    function flushPending(limbs) {
+      ['left', 'right'].forEach((side) => {
+        const a = limbs[side], o = limbs[side === 'left' ? 'right' : 'left'];
+        if (!a.pending) return;
+        if ((!limbActive(o) && !o.pending) || NOW - a.finEnd > PAIR_WAIT_MS) {
+          a.pending = false; a.lastCountMs = NOW;
+          if (a.finOk) rep(); else badRep(a.finReason);
+        }
+      });
+    }
+
+    // Advance ONE limb's single-metric rep state machine (hysteresis + extreme +
+    // form-evidence), finishing via finishLimb. Completeness uses activeWhenBelow
+    // (min vs max). maxActiveMs abandons a rep stuck active (limb never returned).
+    function runSideRep(limbs, side, opts) {
+      const st = limbs[side];
+      const below = opts.activeWhenBelow, m = opts.metric;
+      st.lastSeenMs = NOW;
+      if (st.stage === 'active') {
+        st.activeFrames++;
+        if (opts.formEvaluable) { st.evalFrames++; if (opts.formBad) st.badFrames++; }
+        if (m !== undefined && m !== null) {
+          if (st.extreme === null) st.extreme = m;
+          else st.extreme = below ? Math.min(st.extreme, m) : Math.max(st.extreme, m);
+        }
+        if (NOW - st.activeStart > (opts.maxActiveMs || 8000)) { abandonSideRep(st); return; }  // stuck → abandon
+      }
+      const entering = below ? (m < opts.enter) : (m > opts.enter);
+      const exiting  = below ? (m > opts.exit)  : (m < opts.exit);
+      if (st.stage === 'ready' && entering) {
+        st.stage = 'active'; st.activeStart = NOW;
+        st.activeFrames = 1; st.evalFrames = 0; st.badFrames = 0; st.extreme = (m !== undefined ? m : null);
+        if (opts.formEvaluable) { st.evalFrames = 1; if (opts.formBad) st.badFrames = 1; }
+      } else if (st.stage === 'active' && exiting) {
+        st.stage = 'ready';
+        if (st.activeFrames < (opts.minActiveFrames || 2)) return;   // too short to be a real rep
+        let complete = true, reason = '';
+        if (opts.target !== undefined && st.extreme !== null) {
+          complete = below ? st.extreme <= opts.target : st.extreme >= opts.target;
+          if (!complete) reason = opts.incompleteMsg || 'Incomplete rep';
+        }
+        const badRatio = st.evalFrames ? st.badFrames / st.evalFrames : 0;
+        const formBad = st.evalFrames >= (opts.minEvalFrames || 3) && badRatio > (opts.badRatio || 0.4);
+        const ok = complete && !formBad;
+        finishLimb(limbs, side, st.activeStart, ok, reason || opts.formMsg, { pair: opts.pair, debounceMs: opts.debounceMs });
+      }
     }
 
     /* =========================================================================
@@ -1319,9 +1465,9 @@
           debounceMs: 300, onActive: () => sayActive('Stand up') });
       },
 
-      // 3. BICEP CURL — left and right arms tracked INDEPENDENTLY (see the per-arm engine
-      // above). Single-arm, alternating and both-arm (paired) curls are all supported;
-      // form + feedback are per arm so a stationary arm never spoils the moving one.
+      // 3. BICEP CURL — EITHER arm (per-arm engine above). Single-arm, alternating and both-arm
+      // (paired -> one rep) curls all count; form + feedback are per arm so a stationary arm never
+      // spoils the moving one. ?arm=left / ?arm=right restricts to one arm.
       bicepcurl: function (keypoints) {
         // Shared upper-body "english": horizontal drift of the shoulder line vs a slow
         // baseline, normalized by body scale. Body sway is a whole-body cheat (not an arm),
@@ -1335,8 +1481,10 @@
           ema['curl_bodyRef'] = ref * 0.92 + cx * 0.08;  // slow baseline so a real sway deviates from it
         }
 
-        const L = updateCurlArm('left', keypoints, bodySway);
-        const Rn = updateCurlArm('right', keypoints, bodySway);
+        // A disabled arm (?arm=) is never advanced -> treated as not visible, so it can't count/pair/flag.
+        const L = armEnabled('left') ? updateCurlArm('left', keypoints, bodySway) : { visible: false };
+        const Rn = armEnabled('right') ? updateCurlArm('right', keypoints, bodySway) : { visible: false };
+        flushPending(curlArms);   // count a lone arm once its partner isn't coming
 
         // lastAngle fallback = the more-flexed visible elbow (used by the angle helpers).
         if (L.visible && Rn.visible) lastAngle = Math.min(L.elbowAngle, Rn.elbowAngle);
@@ -1350,7 +1498,7 @@
           debugEl.textContent = 'arm(s) unclear — show your arm(s)';
           return;
         }
-        const leftBad = L.visible && L.swingBad, rightBad = Rn.visible && Rn.swingBad;
+        const leftBad = L.visible && L.active && L.swingBad, rightBad = Rn.visible && Rn.active && Rn.swingBad;
         const leftBounce = L.visible && L.bounce, rightBounce = Rn.visible && Rn.bounce;
         if (leftBad || rightBad) {                       // elbow instability (highest-priority live fault)
           setForm('bad', (leftBad && rightBad) ? 'Keep your elbows stable'
@@ -1363,16 +1511,18 @@
         } else {
           setForm('good');                               // >=1 arm visible, no fault
         }
-        debugEl.textContent = 'L:' + (L.visible ? Math.round(L.elbowAngle) : '-') + '(' + curlArms.left.phase + ')'
+        debugEl.textContent = 'arm:' + ARM_SEL
+          + ' L:' + (L.visible ? Math.round(L.elbowAngle) : '-') + '(' + curlArms.left.phase + ')'
           + ' R:' + (Rn.visible ? Math.round(Rn.elbowAngle) : '-') + '(' + curlArms.right.phase + ')'
           + ' good:' + count + ' bad:' + badCount + (bodySway ? ' SWAY' : '');
       },
 
       // 4. LATERAL RAISE — left/right arms tracked on the shared per-arm engine (config LAT) with
       // SIDEWAYS-direction validation. A raise only counts if the arm travelled OUT TO THE SIDE;
-      // a forward/backward swing, a too-bent elbow or raising above the shoulder are faults. Counts
-      // ONLY when BOTH arms raise together (single-arm/alternating is not counted). The live red
-      // border uses the SAME sustained-fault signal that fails the rep, so they agree.
+      // a forward/backward swing, a too-bent elbow or raising above the shoulder are faults.
+      // EITHER-arm counting (mode:'either'): two arms that START together pair into ONE rep, a lone
+      // arm counts on its own via flushPending(latArms). The live red border uses the SAME
+      // sustained-fault signal that fails the rep, so they agree.
       lateralraise: function (keypoints) {
         // Shared torso swing (body english): horizontal drift of the shoulder line vs a slow
         // baseline, torso-normalized. Not arm-specific, so evaluated once per frame.
@@ -1385,8 +1535,10 @@
           ema['lr_bodyRef'] = ref * 0.92 + cx * 0.08;
         }
 
-        const L = updateRaiseArm('left', latArms, keypoints, bodySway, LAT);
-        const Rn = updateRaiseArm('right', latArms, keypoints, bodySway, LAT);
+        // A disabled arm (?arm=) is never advanced -> treated as not visible, so it can't count/pair/flag.
+        const L = armEnabled('left') ? updateRaiseArm('left', latArms, keypoints, bodySway, LAT) : { visible: false };
+        const Rn = armEnabled('right') ? updateRaiseArm('right', latArms, keypoints, bodySway, LAT) : { visible: false };
+        flushPending(latArms);   // count a lone arm once its partner isn't coming
 
         if (L.visible && Rn.visible) lastAngle = Math.max(L.armAngle, Rn.armAngle);
         else if (L.visible) lastAngle = L.armAngle;
@@ -1402,7 +1554,8 @@
         const fault = (L.visible && L.faultLive) ? L.faultReason : (Rn.visible && Rn.faultLive) ? Rn.faultReason : '';
         if (fault) setForm('bad', fault);
         else setForm('good');
-        debugEl.textContent = 'L:' + (L.visible ? Math.round(L.armAngle) + '/' + L.dir + '/' + L.elbowAngle : '-')
+        debugEl.textContent = 'arm:' + ARM_SEL
+          + ' L:' + (L.visible ? Math.round(L.armAngle) + '/' + L.dir + '/' + L.elbowAngle : '-')
           + ' R:' + (Rn.visible ? Math.round(Rn.armAngle) + '/' + Rn.dir + '/' + Rn.elbowAngle : '-')
           + ' good:' + count + ' bad:' + badCount + (bodySway ? ' SWAY' : '');
       },
@@ -1410,8 +1563,9 @@
       // 5. FRONT RAISE — left/right arms on the shared per-arm engine (config FRONT) with FORWARD-
       // direction validation. A raise only counts if the arm travelled FORWARD in front of the body;
       // lateral/backward raises, a too-bent elbow, or a forearm-only (curl-like) motion are faults.
-      // Counts ONLY when BOTH arms raise together. The live red border uses the SAME sustained-fault
-      // signal that fails the rep, so red and the count never disagree.
+      // EITHER-arm counting (mode:'either'): one arm counts alone, two arms that START together pair
+      // into ONE rep (via flushPending(fraiseArms)). The live red border uses the SAME sustained-fault
+      // signal that fails the rep, so red and the count never disagree. ?arm= restricts to one arm.
       frontraise: function (keypoints) {
         // Shared torso swing (body english): horizontal drift of the shoulder line vs a slow
         // baseline, torso-normalized. Not arm-specific, so evaluated once per frame.
@@ -1424,8 +1578,10 @@
           ema['fr_bodyRef'] = ref * 0.92 + cx * 0.08;
         }
 
-        const L = updateRaiseArm('left', fraiseArms, keypoints, bodySway, FRONT);
-        const Rn = updateRaiseArm('right', fraiseArms, keypoints, bodySway, FRONT);
+        // A disabled arm (?arm=) is never advanced -> treated as not visible, so it can't count/pair/flag.
+        const L = armEnabled('left') ? updateRaiseArm('left', fraiseArms, keypoints, bodySway, FRONT) : { visible: false };
+        const Rn = armEnabled('right') ? updateRaiseArm('right', fraiseArms, keypoints, bodySway, FRONT) : { visible: false };
+        flushPending(fraiseArms);   // count a lone arm once its partner isn't coming
 
         if (L.visible && Rn.visible) lastAngle = Math.max(L.armAngle, Rn.armAngle);
         else if (L.visible) lastAngle = L.armAngle;
@@ -1442,7 +1598,8 @@
         const fault = (L.visible && L.faultLive) ? L.faultReason : (Rn.visible && Rn.faultLive) ? Rn.faultReason : '';
         if (fault) setForm('bad', fault);
         else setForm('good');
-        debugEl.textContent = 'L:' + (L.visible ? Math.round(L.armAngle) + '/' + L.dir + '/' + L.elbowAngle : '-')
+        debugEl.textContent = 'arm:' + ARM_SEL
+          + ' L:' + (L.visible ? Math.round(L.armAngle) + '/' + L.dir + '/' + L.elbowAngle : '-')
           + ' R:' + (Rn.visible ? Math.round(Rn.armAngle) + '/' + Rn.dir + '/' + Rn.elbowAngle : '-')
           + ' good:' + count + ' bad:' + badCount + (bodySway ? ' SWAY' : '');
       },
@@ -1466,23 +1623,45 @@
           minEvalFrames: 4, badRatio: 0.5, debounceMs: 300, onActive: () => sayActive('Press up') });
       },
 
-      // 7. TRICEP EXTENSION — requires reasonable lockout; penalizes upper-arm swing.
+      // 7. TRICEP EXTENSION (overhead) — each arm counted on its OWN limb machine; two hands
+      // on one dumbbell (arms start together) pair into ONE rep, a single arm counts alone.
+      // An arm is only TRACKED while the elbow is raised overhead, so a hanging arm can't sit
+      // "active" forever or produce a phantom rep when you switch sides. Uses kpL (lower vis
+      // gate) + sideMissing so the far arm's reps aren't abandoned on a flickered wrist.
       tricepextension: function (keypoints) {
-        const S = pickSide(keypoints, ['shoulder', 'elbow', 'wrist']);
-        const shoulder = kp(keypoints, S + '_shoulder'), elbow = kp(keypoints, S + '_elbow'), wrist = kp(keypoints, S + '_wrist');
-        if (!(shoulder && elbow && wrist)) { setForm('unknown'); debugEl.textContent = 'show your arm overhead'; return; }
-        const elbowAngle = smoothV('tri_elbow', ang(shoulder, elbow, wrist));
-        lastAngle = elbowAngle;
-        const hip = kp(keypoints, S + '_hip');
-        const swingEvaluable = !!hip;
-        const swing = hip ? ang(hip, shoulder, elbow) : 0;
-        const swingBad = swingEvaluable && Math.abs(swing - (ema['tri_swingRef'] || swing)) > 35;
-        ema['tri_swingRef'] = (ema['tri_swingRef'] || swing) * 0.95 + swing * 0.05;
-        setForm(swingEvaluable ? (swingBad ? 'bad' : 'good') : 'unknown', 'Keep your upper arm still');
-        debugEl.textContent = 'ELBOW:' + Math.round(elbowAngle) + ' ' + R.stage + ' good:' + count + ' bad:' + badCount + ' side:' + S;
-        runRep({ metric: elbowAngle, activeWhenBelow: false, enter: 130, exit: 110, target: 160,
-          incompleteMsg: 'Extend fully', formMsg: 'Keep your upper arm still', formEvaluable: swingEvaluable, formBad: swingBad,
-          debounceMs: 300, onActive: () => sayActive('Extend') });
+        const torso = torsoPx || 120;   // body-scale reference in px (fallback if scale is off)
+        let anyTracked = false, fault = '';
+        const dbg = { left: '-', right: '-' };
+        ['left', 'right'].forEach((side) => {
+          const shoulder = kpL(keypoints, side + '_shoulder'), elbow = kpL(keypoints, side + '_elbow');
+          const wrist = kpL(keypoints, side + '_wrist');
+          if (!(shoulder && elbow)) { sideMissing(triArms[side]); return; }   // can't judge arm position
+          // POSITION gate: only track an overhead arm (elbow at/above ~shoulder height).
+          const raised = elbow.y < shoulder.y + 0.25 * torso;
+          if (!raised) { abandonSideRep(triArms[side]); ema['tri_swingRef_' + side] = undefined; return; }
+          if (!wrist) { sideMissing(triArms[side]); dbg[side] = '··(' + triArms[side].stage[0] + ')'; return; }  // keep rep alive
+          anyTracked = true;
+          const elbowAngle = smoothV('tri_elbow_' + side, ang(shoulder, elbow, wrist));
+          lastAngle = elbowAngle;
+          const hip = kpL(keypoints, side + '_hip');
+          const swingEvaluable = !!hip;
+          const swing = swingEvaluable ? ang(hip, shoulder, elbow) : 0;
+          const refKey = 'tri_swingRef_' + side;
+          const ref = ema[refKey] === undefined ? swing : ema[refKey];
+          const swingBad = swingEvaluable && Math.abs(swing - ref) > 35;
+          ema[refKey] = ref * 0.95 + swing * 0.05;
+          if (swingBad) fault = 'Keep your upper arm still';
+          runSideRep(triArms, side, { metric: elbowAngle, activeWhenBelow: false,
+            enter: 130, exit: 110, target: 150,   // target 150: a real on-camera lockout reads ~150-160°
+            incompleteMsg: 'Extend fully', formMsg: 'Keep your upper arm still',
+            formEvaluable: swingEvaluable, formBad: swingBad,
+            minActiveFrames: 2, minEvalFrames: 3, badRatio: 0.4, debounceMs: 400, pair: true, maxActiveMs: 8000 });
+          dbg[side] = Math.round(elbowAngle) + '(' + triArms[side].stage[0] + ')';
+        });
+        flushPending(triArms);
+        if (!anyTracked) setForm('unknown', '');
+        else setForm(fault ? 'bad' : 'good', fault || 'Keep your upper arm still');
+        debugEl.textContent = 'TRI L:' + dbg.left + ' R:' + dbg.right + ' good:' + count + ' bad:' + badCount;
       },
 
       // 8. PUSH-UP — elbow depth AND body-line (temporally confirmed), with UNKNOWN support.
@@ -1559,25 +1738,47 @@
         else if (R.stage === 'active' && closed) repFinish({ debounceMs: 250, minActiveFrames: 2, minEvalFrames: 3, badRatio: 0.6, formMsg: 'Move your arms and legs together' });
       },
 
-      // 10. HIGH KNEES — body-relative lift, alternating knees, short debounce.
+      // 10. HIGH KNEES — each knee on its OWN limb machine (pair:false) so alternating knees
+      // both count. Metric is a TORSO-NORMALIZED knee drop below the hip line (standing ≈ 0.9,
+      // thigh at hip height ≈ 0), so it's body-scale/distance invariant. Uses kpL + sideMissing
+      // and whichever hips are visible (not both required).
       highknees: function (keypoints) {
-        const lh = kp(keypoints, 'left_hip'), rh = kp(keypoints, 'right_hip');
-        const lk = kp(keypoints, 'left_knee'), rk = kp(keypoints, 'right_knee');
-        if (!(lh && rh && (lk || rk))) { setForm('unknown'); debugEl.textContent = 'show your full body'; return; }
-        const hipY = (lh.y + rh.y) / 2;
-        const margin = 55 * bodyScale;
-        const kneeUp = (lk && lk.y < hipY + margin) || (rk && rk.y < hipY + margin);
-        // FORM: stay tall — leaning the torso back to throw the knee up = a cheat. Only judged when
-        // the shoulders are visible; otherwise form is not asserted (ROM still gates the rep).
-        const ls = kp(keypoints, 'left_shoulder'), rs = kp(keypoints, 'right_shoulder');
-        const leanEval = !!(ls && rs);
-        const leanDeg = leanEval ? verticalDeg({ x: (ls.x + rs.x) / 2, y: (ls.y + rs.y) / 2 }, { x: (lh.x + rh.x) / 2, y: hipY }) : 0;
+        const lh = kpL(keypoints, 'left_hip'), rh = kpL(keypoints, 'right_hip');
+        const hips = [lh, rh].filter(Boolean);
+        if (!hips.length) {
+          sideMissing(hkLegs.left); sideMissing(hkLegs.right);   // keep in-progress reps alive through brief loss
+          setForm('unknown'); debugEl.textContent = 'show your full body'; return;
+        }
+        const hipY = hips.reduce((t, h) => t + h.y, 0) / hips.length;
+        const hipX = hips.reduce((t, h) => t + h.x, 0) / hips.length;
+        // torso reference (px): smoothed body scale, else shoulder→hip distance, else a constant.
+        const ls = kpL(keypoints, 'left_shoulder'), rs = kpL(keypoints, 'right_shoulder');
+        const shoulders = [ls, rs].filter(Boolean);
+        const shX = shoulders.length ? shoulders.reduce((t, s) => t + s.x, 0) / shoulders.length : null;
+        const shY = shoulders.length ? shoulders.reduce((t, s) => t + s.y, 0) / shoulders.length : null;
+        const torsoRef = torsoPx || (shY !== null ? Math.hypot(shX - hipX, shY - hipY) : 120);
+        // FORM: stay tall — leaning the torso back to throw the knee up = a cheat (needs both shoulders).
+        const leanEval = shoulders.length === 2;
+        const leanDeg = leanEval ? verticalDeg({ x: shX, y: shY }, { x: hipX, y: hipY }) : 0;
         const leanBad = leanEval && leanDeg > 28;
+        const dbg = { left: '-', right: '-' };
+        let anyKnee = false;
+        ['left', 'right'].forEach((side) => {
+          const knee = kpL(keypoints, side + '_knee');
+          if (!knee) { sideMissing(hkLegs[side]); return; }
+          anyKnee = true;
+          // drop: 0 at hip height, ~0.9 standing. activeWhenBelow true -> active when knee rises.
+          const drop = smoothV('hk_' + side, (knee.y - hipY) / (torsoRef || 1), 0.6);
+          runSideRep(hkLegs, side, { metric: drop, activeWhenBelow: true,
+            enter: 0.45, exit: 0.65, target: 0.35,
+            incompleteMsg: 'Drive your knee up to hip height', formMsg: 'Keep your torso upright',
+            formEvaluable: leanEval, formBad: leanBad,
+            minActiveFrames: 1, minEvalFrames: 2, badRatio: 0.5, debounceMs: 150, pair: false, maxActiveMs: 4000 });
+          dbg[side] = drop.toFixed(2) + '(' + hkLegs[side].stage[0] + ')';
+        });
+        if (!anyKnee) { setForm('unknown'); debugEl.textContent = 'show your full body'; return; }
         setForm(leanBad ? 'bad' : 'good', 'Keep your torso upright');
-        debugEl.textContent = 'kneeUp:' + kneeUp + ' LEAN:' + Math.round(leanDeg) + ' ' + R.stage + ' good:' + count + ' bad:' + badCount + ' sc:' + bodyScale.toFixed(2);
-        if (R.stage === 'active') repFrame(leanEval, leanBad);
-        if (R.stage === 'ready' && kneeUp) repStart();
-        else if (R.stage === 'active' && !kneeUp) repFinish({ debounceMs: 150, minActiveFrames: 1, minEvalFrames: 2, badRatio: 0.5, formMsg: 'Keep your torso upright' });
+        debugEl.textContent = 'HK L:' + dbg.left + ' R:' + dbg.right + ' good:' + count + ' bad:' + badCount;
       },
 
       // 11. KNEE RAISE — meaningful knee lift relative to body; robust to one-side visibility.
@@ -1604,27 +1805,37 @@
         else if (R.stage === 'active' && down) repFinish({ debounceMs: 300, minActiveFrames: 2, minEvalFrames: 2, badRatio: 0.5, formMsg: 'Keep your torso upright' });
       },
 
-      // 12. SIDE LEG RAISE — estimate lateral abduction (hip->ankle horizontal offset) vs vertical drop,
-      // normalized by leg length so user height isn't assumed.
+      // 12. SIDE LEG RAISE — lateral abduction of the ankle from the hip, normalized by PIXEL
+      // leg length (hip→knee→ankle). Each leg counted INDEPENDENTLY (pair:false) via its own
+      // limb machine, so doing all reps on one leg then switching keeps counting. Uses kpL +
+      // sideMissing. NOTE: legLen is a PIXEL distance here — mixing it with the metric dist3D()
+      // (world metres) made the ratio ~20 and the leg always looked "raised".
       sidelegraise: function (keypoints) {
-        const S = pickSide(keypoints, ['hip', 'knee', 'ankle']);
-        const hip = kp(keypoints, S + '_hip'), knee = kp(keypoints, S + '_knee'), ankle = kp(keypoints, S + '_ankle');
-        if (!(hip && knee && ankle)) { setForm('unknown'); debugEl.textContent = 'show hip, knee & ankle'; return; }
-        const legLen = Math.max(dist3D(hip, knee) + dist3D(knee, ankle), 1);
-        // Lateral offset of the ankle from the hip, normalized by leg length (0 = straight down).
-        const lateral = Math.abs(ankle.x - hip.x) / (USE_BODY_SCALE ? (legLen) : 1);
-        const abduction = smoothV('slr', lateral);
-        const raised = abduction > 0.45, lowered = abduction < 0.2;
-        // FORM: raise from the hip, don't lean the torso over to hike the leg up.
-        const shoulder = kp(keypoints, S + '_shoulder');
-        const leanEval = !!shoulder;
-        const leanDeg = leanEval ? verticalDeg(shoulder, hip) : 0;
-        const leanBad = leanEval && leanDeg > 30;
-        setForm(leanBad ? 'bad' : 'good', 'Keep your torso upright — raise from the hip');
-        debugEl.textContent = 'ABDUCT:' + abduction.toFixed(2) + ' LEAN:' + Math.round(leanDeg) + ' ' + R.stage + ' good:' + count + ' bad:' + badCount + ' side:' + S;
-        if (R.stage === 'active') repFrame(leanEval, leanBad, abduction, 'max');
-        if (R.stage === 'ready' && raised) repStart(() => sayActive('Lower your leg'));
-        else if (R.stage === 'active' && lowered) repFinish({ debounceMs: 300, minActiveFrames: 2, minEvalFrames: 3, badRatio: 0.5, target: 0.45, track: 'max', incompleteMsg: 'Raise your leg higher', formMsg: 'Keep your torso upright — raise from the hip' });
+        let anyVisible = false, fault = '';
+        const dbg = { left: '-', right: '-' };
+        ['left', 'right'].forEach((side) => {
+          const hip = kpL(keypoints, side + '_hip'), knee = kpL(keypoints, side + '_knee'), ankle = kpL(keypoints, side + '_ankle');
+          if (!(hip && knee && ankle)) { sideMissing(slrLegs[side]); return; }
+          anyVisible = true;
+          const legLen = Math.max(Math.hypot(hip.x - knee.x, hip.y - knee.y) + Math.hypot(knee.x - ankle.x, knee.y - ankle.y), 1);
+          // Lateral offset of the ankle from the hip, normalized by leg length (0 = straight down).
+          const abduction = smoothV('slr_' + side, Math.abs(ankle.x - hip.x) / legLen);
+          // FORM: raise from the hip, don't lean the torso over to hike the leg up.
+          const shoulder = kpL(keypoints, side + '_shoulder');
+          const leanEval = !!shoulder;
+          const leanDeg = leanEval ? verticalDeg(shoulder, hip) : 0;
+          const leanBad = leanEval && leanDeg > 30;
+          if (leanBad) fault = 'Keep your torso upright — raise from the hip';
+          runSideRep(slrLegs, side, { metric: abduction, activeWhenBelow: false,
+            enter: 0.45, exit: 0.2, target: 0.45,
+            incompleteMsg: 'Raise your leg higher', formMsg: 'Keep your torso upright — raise from the hip',
+            formEvaluable: leanEval, formBad: leanBad,
+            minActiveFrames: 2, minEvalFrames: 3, badRatio: 0.5, debounceMs: 300, pair: false, maxActiveMs: 8000 });
+          dbg[side] = abduction.toFixed(2) + '(' + slrLegs[side].stage[0] + ')';
+        });
+        if (!anyVisible) { setForm('unknown'); debugEl.textContent = 'show hip, knee & ankle'; return; }
+        setForm(fault ? 'bad' : 'good', fault || 'Keep your torso upright — raise from the hip');
+        debugEl.textContent = 'SLR L:' + dbg.left + ' R:' + dbg.right + ' good:' + count + ' bad:' + badCount;
       },
 
       // 13. SIDE BEND — torso tilt from shoulder/hip lines, normalized by hip width.
@@ -2110,9 +2321,15 @@
         // No person this frame.
         if (started) {
           const gap = exercise === 'deadlift' ? POSE_GAP_DL_MS : POSE_GAP_MS;
-          if (lastSeenMs && NOW - lastSeenMs > gap && R.stage === 'active') {
-            // Brief loss: abandon the incomplete rep (no count, no fake bad rep).
-            R.stage = 'ready'; R.extreme = null; R.readySinceMs = NOW; dlAgg = null;
+          if (lastSeenMs && NOW - lastSeenMs > gap) {
+            // Brief loss: abandon any incomplete rep (no count, no fake bad rep).
+            if (R.stage === 'active') { R.stage = 'ready'; R.extreme = null; R.readySinceMs = NOW; dlAgg = null; }
+            // Independent per-side engines (tricep / side-leg / high-knees) too.
+            abandonSideRep(triArms.left); abandonSideRep(triArms.right);
+            abandonSideRep(slrLegs.left); abandonSideRep(slrLegs.right);
+            abandonSideRep(hkLegs.left); abandonSideRep(hkLegs.right);
+            // Flush any arm still waiting for a partner so a lone final rep isn't stranded.
+            flushPending(triArms); flushPending(latArms); flushPending(curlArms); flushPending(fraiseArms);
           }
           // Pose lost = UNKNOWN (amber), NOT bad form.
           formBorder.classList.remove('amber-pulse');
