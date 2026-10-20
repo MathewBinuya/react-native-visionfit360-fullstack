@@ -114,11 +114,6 @@ export default function Dashboard() {
         <div className="page-head">
           <div>
             <h1 className="page-title">Overview</h1>
-            <p className="page-sub">
-              {presence ? (
-                <><span className="live-dot" /> Active now</>
-              ) : "Loading…"}
-            </p>
           </div>
           <div className="range-toggle" role="group" aria-label="Trend range">
             {[7, 30].map((r) => (
