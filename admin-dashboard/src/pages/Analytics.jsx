@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Sidebar from "../components/Sidebar";
 import { StatCard, StateBlock, Section, TableScroll, Pagination } from "../components/ui";
+import { LineChart } from "../components/Charts";
 import api from "../lib/api";
 
 const TABS = ["Recent", "Monthly", "Yearly"];
@@ -31,6 +32,20 @@ function RecentView() {
         <StatCard label="Completed sessions · 7 days" value={d7?.kpis?.sessionsInRange ?? "—"} />
         <StatCard label="New users · 30 days" value={d30?.kpis?.newUsers ?? "—"} />
         <StatCard label="Completed sessions · 30 days" value={d30?.kpis?.sessionsInRange ?? "—"} />
+      </div>
+      <div className="grid-2" style={{ marginTop: 16 }}>
+        <div className="card">
+          <h3 className="card-title">New users · last 30 days</h3>
+          <StateBlock empty={!d30?.analytics?.newUsersTrend?.length} emptyText="No sign-ups in this range.">
+            <LineChart data={d30?.analytics?.newUsersTrend || []} />
+          </StateBlock>
+        </div>
+        <div className="card">
+          <h3 className="card-title">Completed sessions · last 30 days</h3>
+          <StateBlock empty={!d30?.workouts?.usageTrend?.length} emptyText="No sessions in this range.">
+            <LineChart data={d30?.workouts?.usageTrend || []} />
+          </StateBlock>
+        </div>
       </div>
     </StateBlock>
   );
