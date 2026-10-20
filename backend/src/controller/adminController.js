@@ -25,8 +25,11 @@ const generateAdminToken = (id) =>
 
 // Explicit allow-list of user fields safe to expose to admins.
 // (Never leak password, currentToken, reset/verification codes, etc.)
+// dateOfBirth is intentionally omitted — it's no longer shown in the admin UI.
+// The field still exists on the schema and is used elsewhere (mobile profile,
+// AI age context); the admin simply doesn't read or display it.
 const SAFE_USER_FIELDS =
-  "name username email photo bio gender goal dateOfBirth heightCm weightKg status onBoardingComplete isVerified createdAt updatedAt lastLoginAt lastActiveAt";
+  "name username email photo bio gender goal heightCm weightKg status onBoardingComplete isVerified createdAt updatedAt lastLoginAt lastActiveAt";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -53,6 +56,28 @@ const fillDays = (rows, start, now) => {
     out.push({ date, count: counts.get(date) || 0 });
   }
   return out;
+};
+
+// --- Pagination helpers (shared by every paginated admin list) ---
+// Validate on the server so a crafted ?limit=999999 can't dump the whole table.
+const DEFAULT_PAGE_LIMIT = 10;
+const MAX_PAGE_LIMIT = 100;
+const parsePaging = (req, { defaultLimit = DEFAULT_PAGE_LIMIT } = {}) => {
+  const page = Math.max(1, Math.floor(Number(req.query.page)) || 1);
+  const limit = Math.min(MAX_PAGE_LIMIT, Math.max(1, Math.floor(Number(req.query.limit)) || defaultLimit));
+  return { page, limit };
+};
+const pageMeta = (data, total, page, limit) => {
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+  return {
+    data,
+    page,
+    limit,
+    total,
+    totalPages,
+    hasNext: page < totalPages,
+    hasPrev: page > 1,
+  };
 };
 
 // Same exercise under different spellings (RepVision saves "bicepcurl", the
@@ -440,10 +465,61 @@ export const getStats = async (req, res) => {
 };
 
 //  USER MANAGEMENT
+// Server-side pagination so the admin never has to download the whole table.
+// Search (name/username/email), sort and the Active/Inactive filter are all
+// resolved in a single aggregation; "last seen" is max(lastActiveAt, lastLoginAt)
+// — the same rule the UI uses — computed in-pipeline so it can also be sorted on.
+const USER_SORTS = {
+  newest: { createdAt: -1 },
+  oldest: { createdAt: 1 },
+  name_az: { name: 1, username: 1 },
+  name_za: { name: -1, username: -1 },
+  recent_active: { seen: -1 },
+  least_active: { seen: 1 },
+};
+const ACCOUNT_ACTIVE_MS = ACCOUNT_ACTIVE_DAYS * DAY_MS;
+
 export const getUsers = async (req, res) => {
   try {
-    const users = await User.find().select(SAFE_USER_FIELDS).sort({ createdAt: -1 });
-    res.json(users);
+    const { page, limit } = parsePaging(req);
+    const search = String(req.query.search || "").trim();
+    const sort = USER_SORTS[req.query.sort] || USER_SORTS.newest;
+    const status = ["active", "inactive"].includes(req.query.status) ? req.query.status : null;
+    const activeThreshold = new Date(Date.now() - ACCOUNT_ACTIVE_MS);
+
+    const pipeline = [];
+    if (search) {
+      const re = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      pipeline.push({ $match: { $or: [{ name: re }, { username: re }, { email: re }] } });
+    }
+    // effective "last seen" instant (null when never seen)
+    pipeline.push({ $addFields: { seen: { $max: ["$lastActiveAt", "$lastLoginAt"] } } });
+    if (status === "active") {
+      pipeline.push({ $match: { seen: { $gte: activeThreshold } } });
+    } else if (status === "inactive") {
+      pipeline.push({ $match: { $or: [{ seen: null }, { seen: { $lt: activeThreshold } }] } });
+    }
+    pipeline.push({
+      $facet: {
+        data: [
+          { $sort: sort },
+          { $skip: (page - 1) * limit },
+          { $limit: limit },
+          {
+            $project: {
+              name: 1, username: 1, email: 1, photo: 1, gender: 1, goal: 1,
+              status: 1, isVerified: 1, createdAt: 1, lastLoginAt: 1, lastActiveAt: 1,
+            },
+          },
+        ],
+        total: [{ $count: "count" }],
+      },
+    });
+
+    const result = await User.aggregate(pipeline);
+    const data = result[0]?.data || [];
+    const total = result[0]?.total?.[0]?.count || 0;
+    res.json(pageMeta(data, total, page, limit));
   } catch (error) {
     res.status(500).json({ message: "Server error" });
   }
@@ -874,6 +950,208 @@ export const updateUserStatus = async (req, res) => {
     if (!user) return res.status(404).json({ message: "User not found" });
     res.json(user);
   } catch (error) {
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+//  FEEDBACK (admin read — the dedicated Feedback tab)
+//  Paginated, newest first. Records left behind by deleted accounts are ignored,
+//  matching the rest of the dashboard. The mobile submit flow is untouched.
+export const getFeedback = async (req, res) => {
+  try {
+    const { page, limit } = parsePaging(req);
+    const liveUsers = await User.distinct("_id");
+    const match = ownedBy(liveUsers);
+
+    const [data, total] = await Promise.all([
+      Feedback.find(match)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .populate("user", "name username email photo"),
+      Feedback.countDocuments(match),
+    ]);
+
+    res.json(pageMeta(data, total, page, limit));
+  } catch (error) {
+    console.log("getFeedback error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+//  HISTORICAL ANALYTICS
+//  Everything below is derived live from real records — User.createdAt for
+//  "New Users" and the completed-session date (completedAt, falling back to date)
+//  for "Completed Sessions" — grouped in Asia/Manila so the buckets line up with
+//  the rest of the dashboard. Nothing is pre-computed or faked.
+const MANILA = { tz: TZ, offset: MANILA_OFFSET_MS };
+// Instant of Manila-local midnight for a given calendar y/m/d. Month/day overflow
+// normalises (m=13 -> next January), so "start of next month/year" is just +1.
+const manilaInstant = (y, m, d) => new Date(Date.UTC(y, m - 1, d) - MANILA.offset);
+const pad2 = (n) => String(n).padStart(2, "0");
+
+// New users per Manila day within [start, end): [{ _id: "YYYY-MM-DD", count }]
+const newUsersByDay = (start, end) =>
+  User.aggregate([
+    { $match: { createdAt: { $gte: start, $lt: end } } },
+    { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: MANILA.tz } }, count: { $sum: 1 } } },
+  ]);
+
+// Completed sessions per Manila day within [start, end), ignoring deleted accounts.
+const sessionsByDay = (start, end, userIds) =>
+  Workout.aggregate([
+    { $match: { ...SESSION_MATCH, ...ownedBy(userIds) } },
+    { $addFields: { at: SESSION_DATE } },
+    { $match: { at: { $gte: start, $lt: end } } },
+    { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$at", timezone: MANILA.tz } }, count: { $sum: 1 } } },
+  ]);
+
+const countsMap = (rows) => new Map(rows.map((r) => [r._id, r.count]));
+
+// GET /analytics/monthly?year=&month=  -> weekly breakdown + totals
+// Weeks bucket by day-of-month (1–7, 8–14, 15–21, 22–28, 29–end) so EVERY day in
+// the month is represented — a 5th partial week is kept, never discarded.
+export const getMonthlyAnalytics = async (req, res) => {
+  try {
+    const now = new Date();
+    const year = Math.floor(Number(req.query.year)) || now.getFullYear();
+    const month = Math.min(12, Math.max(1, Math.floor(Number(req.query.month)) || (now.getMonth() + 1)));
+    const start = manilaInstant(year, month, 1);
+    const end = manilaInstant(year, month + 1, 1);
+
+    const liveUsers = await User.distinct("_id");
+    const [userRows, sessionRows] = await Promise.all([
+      newUsersByDay(start, end),
+      sessionsByDay(start, end, liveUsers),
+    ]);
+    const users = countsMap(userRows);
+    const sessions = countsMap(sessionRows);
+
+    const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const weeks = [];
+    const ranges = [[1, 7], [8, 14], [15, 21], [22, 28], [29, 31]];
+    for (let i = 0; i < ranges.length; i++) {
+      const from = ranges[i][0];
+      const to = Math.min(ranges[i][1], daysInMonth);
+      if (from > daysInMonth) break;
+      let newUsers = 0, completedSessions = 0;
+      for (let d = from; d <= to; d++) {
+        const key = `${year}-${pad2(month)}-${pad2(d)}`;
+        newUsers += users.get(key) || 0;
+        completedSessions += sessions.get(key) || 0;
+      }
+      weeks.push({ week: i + 1, label: `Week ${i + 1}`, fromDay: from, toDay: to, newUsers, completedSessions });
+    }
+
+    const totals = weeks.reduce(
+      (t, w) => ({ newUsers: t.newUsers + w.newUsers, completedSessions: t.completedSessions + w.completedSessions }),
+      { newUsers: 0, completedSessions: 0 }
+    );
+    res.json({ year, month, daysInMonth, weeks, totals });
+  } catch (error) {
+    console.log("getMonthlyAnalytics error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// GET /analytics/yearly?year=  -> Jan–Dec breakdown + yearly totals
+export const getYearlyAnalytics = async (req, res) => {
+  try {
+    const now = new Date();
+    const year = Math.floor(Number(req.query.year)) || now.getFullYear();
+    const start = manilaInstant(year, 1, 1);
+    const end = manilaInstant(year + 1, 1, 1);
+    const liveUsers = await User.distinct("_id");
+
+    const byMonth = (dateExpr, matchExtra = {}) => [
+      { $match: matchExtra },
+      { $group: { _id: { $month: { date: dateExpr, timezone: MANILA.tz } }, count: { $sum: 1 } } },
+    ];
+
+    const [userRows, sessionRows] = await Promise.all([
+      User.aggregate(byMonth("$createdAt", { createdAt: { $gte: start, $lt: end } })),
+      Workout.aggregate([
+        { $match: { ...SESSION_MATCH, ...ownedBy(liveUsers) } },
+        { $addFields: { at: SESSION_DATE } },
+        { $match: { at: { $gte: start, $lt: end } } },
+        { $group: { _id: { $month: { date: "$at", timezone: MANILA.tz } }, count: { $sum: 1 } } },
+      ]),
+    ]);
+    const users = new Map(userRows.map((r) => [r._id, r.count]));
+    const sessions = new Map(sessionRows.map((r) => [r._id, r.count]));
+
+    const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    const months = MONTH_NAMES.map((name, i) => ({
+      month: i + 1,
+      label: name,
+      newUsers: users.get(i + 1) || 0,
+      completedSessions: sessions.get(i + 1) || 0,
+    }));
+    const totals = months.reduce(
+      (t, m) => ({ newUsers: t.newUsers + m.newUsers, completedSessions: t.completedSessions + m.completedSessions }),
+      { newUsers: 0, completedSessions: 0 }
+    );
+    res.json({ year, months, totals });
+  } catch (error) {
+    console.log("getYearlyAnalytics error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// GET /analytics/daily?date=YYYY-MM-DD  -> that single Manila day's figures
+export const getDailyAnalytics = async (req, res) => {
+  try {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(req.query.date || ""));
+    const now = new Date();
+    let year, month, day;
+    if (m) {
+      year = Number(m[1]); month = Number(m[2]); day = Number(m[3]);
+    } else {
+      // default to today in Manila
+      const todayManila = new Date(now.getTime() + MANILA.offset).toISOString().slice(0, 10).split("-");
+      [year, month, day] = todayManila.map(Number);
+    }
+    const start = manilaInstant(year, month, day);
+    const end = manilaInstant(year, month, day + 1);
+    const liveUsers = await User.distinct("_id");
+
+    const [newUsers, completedSessions] = await Promise.all([
+      User.countDocuments({ createdAt: { $gte: start, $lt: end } }),
+      Workout.aggregate([
+        { $match: { ...SESSION_MATCH, ...ownedBy(liveUsers) } },
+        { $addFields: { at: SESSION_DATE } },
+        { $match: { at: { $gte: start, $lt: end } } },
+        { $count: "count" },
+      ]).then((r) => r[0]?.count || 0),
+    ]);
+    res.json({ date: `${year}-${pad2(month)}-${pad2(day)}`, newUsers, completedSessions });
+  } catch (error) {
+    console.log("getDailyAnalytics error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// GET /analytics/years -> every year that has data, newest first (for the pickers).
+// Never hardcoded: derived from the earliest user sign-up / completed session.
+export const getAnalyticsYears = async (req, res) => {
+  try {
+    const now = new Date();
+    const currentYear = Number(new Date(now.getTime() + MANILA.offset).toISOString().slice(0, 4));
+    const [firstUser, firstSession] = await Promise.all([
+      User.findOne().sort({ createdAt: 1 }).select("createdAt").lean(),
+      Workout.findOne({ ...SESSION_MATCH }).sort({ date: 1 }).select("date completedAt createdAt").lean(),
+    ]);
+    const yearOf = (d) => (d ? Number(new Date(new Date(d).getTime() + MANILA.offset).toISOString().slice(0, 4)) : currentYear);
+    const earliest = Math.min(
+      yearOf(firstUser?.createdAt),
+      yearOf(firstSession?.completedAt || firstSession?.date || firstSession?.createdAt),
+      currentYear
+    );
+    const years = [];
+    for (let y = currentYear; y >= earliest; y--) years.push(y);
+    res.json({ years, currentYear });
+  } catch (error) {
+    console.log("getAnalyticsYears error:", error);
     res.status(500).json({ message: "Server error" });
   }
 };

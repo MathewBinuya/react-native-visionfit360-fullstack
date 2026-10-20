@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
-import { RatingStars, Avatar, StateBlock } from "../components/ui";
+import { RatingStars, Avatar, StateBlock, Pagination, TableScroll } from "../components/ui";
 import api from "../lib/api";
 import {
   relativeTime, dateTime, shortDate, bmiInfo, exerciseLabel, displayName, accountStatus,
@@ -12,6 +12,8 @@ const GOAL_LABELS = {
   maintain_weight: "Maintain weight",
   get_lean: "Get lean",
 };
+
+const WORKOUTS_PER_PAGE = 10;
 
 function Row({ label, value }) {
   return (
@@ -28,6 +30,7 @@ export default function UserDetail() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [woPage, setWoPage] = useState(1); // workout history page
 
   const load = useCallback(() => {
     api
@@ -81,7 +84,6 @@ export default function UserDetail() {
                 <div className="card">
                   <h3 className="card-title">Body &amp; demographics</h3>
                   <Row label="Gender" value={u.gender ? u.gender.charAt(0).toUpperCase() + u.gender.slice(1) : null} />
-                  <Row label="Date of birth" value={u.dateOfBirth ? shortDate(u.dateOfBirth) : null} />
                   <Row label="Height" value={u.heightCm ? `${u.heightCm} cm` : null} />
                   <Row label="Weight" value={u.weightKg ? `${u.weightKg} kg` : null} />
                   <Row label="BMI" value={bmi ? `${bmi.bmi} (${bmi.category})` : null} />
@@ -90,24 +92,40 @@ export default function UserDetail() {
 
               <div className="card">
                 <h3 className="card-title">Workout history ({data.workouts.length})</h3>
-                <StateBlock empty={data.workouts.length === 0} emptyText="No workouts.">
-                  <table className="rows">
-                    <thead>
-                      <tr><th>Title</th><th>Exercises</th><th>Completed</th><th>Date</th></tr>
-                    </thead>
-                    <tbody>
-                      {data.workouts.map((w) => (
-                        <tr key={w._id}>
-                          <td>{w.title || "—"}</td>
-                          <td className="muted">
-                            {(w.exercises || []).map((e) => exerciseLabel(e.name)).join(", ") || "—"}
-                          </td>
-                          <td>{w.completed ? "Yes" : "No"}</td>
-                          <td className="muted">{shortDate(w.createdAt)}</td>
+                <StateBlock empty={data.workouts.length === 0} emptyText="No workout history found.">
+                  <TableScroll>
+                    <table className="rows">
+                      <thead>
+                        <tr>
+                          <th>Title</th>
+                          <th>Exercises</th>
+                          <th className="col-center">Completed</th>
+                          <th className="col-right">Date</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {data.workouts
+                          .slice((woPage - 1) * WORKOUTS_PER_PAGE, woPage * WORKOUTS_PER_PAGE)
+                          .map((w) => (
+                            <tr key={w._id}>
+                              <td>{w.title || "—"}</td>
+                              <td className="muted">
+                                {(w.exercises || []).map((e) => exerciseLabel(e.name)).join(", ") || "—"}
+                              </td>
+                              <td className="col-center">{w.completed ? "Yes" : "No"}</td>
+                              <td className="muted col-right">{shortDate(w.createdAt)}</td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </TableScroll>
+                  <Pagination
+                    page={woPage}
+                    totalPages={Math.max(1, Math.ceil(data.workouts.length / WORKOUTS_PER_PAGE))}
+                    total={data.workouts.length}
+                    label="workouts"
+                    onPage={setWoPage}
+                  />
                 </StateBlock>
               </div>
 

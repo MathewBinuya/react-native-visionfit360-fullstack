@@ -389,9 +389,39 @@ tr.clickable:hover { background: var(--subtle); }
 @media (max-width: 760px) { .detail-grid { grid-template-columns: 1fr; } }
 
 /* pager */
-.pager { display: flex; align-items: center; gap: 14px; margin-top: 16px; }
-.pager-info { font-size: 13px; color: var(--muted); }
+.pager { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 16px; }
+.pager-info { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .btn-small:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ---------- SHARED ALIGNMENT UTILITIES ----------
+   Tables are left-aligned by default (text columns). These keep numeric values
+   and action cells aligned consistently, and — crucially — keep each column
+   header aligned with the data beneath it. Scoped to table.rows so they win over
+   the base `text-align: left` without !important. */
+table.rows th.col-right, table.rows td.col-right { text-align: right; }
+table.rows th.col-center, table.rows td.col-center { text-align: center; }
+
+/* Horizontal scroll for any table wider than the screen — columns keep their
+   width and the table scrolls sideways instead of squeezing or breaking out. */
+.table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-scroll > table.rows { min-width: 560px; }
+
+/* long free-text cells (e.g. feedback message) wrap without wrecking the layout */
+.feedback-message { max-width: 420px; white-space: normal; word-break: break-word; }
+
+/* table totals row (analytics) */
+table.rows tfoot td { border-top: 1px solid var(--border); border-bottom: none; font-weight: 600; color: var(--ink); }
+table.rows tfoot .row-total td { padding-top: 12px; }
+
+/* ---------- ANALYTICS ---------- */
+/* segmented tabs: Recent | Monthly | Yearly | Date */
+.seg-tabs { display: inline-flex; background: var(--subtle); border-radius: 9px; padding: 3px; margin-bottom: 24px; flex-wrap: wrap; }
+.seg-tabs button {
+  border: none; background: transparent; color: var(--muted); font-size: 13px; font-weight: 600;
+  padding: 8px 16px; border-radius: 7px; cursor: pointer;
+}
+.seg-tabs button.active { background: var(--cards); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+.analytics-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
 
 /* responsive */
 @media (max-width: 900px) {

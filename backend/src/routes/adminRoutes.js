@@ -7,6 +7,8 @@ import {
   getExerciseUsage, getUsersByExercise,
   getUsers, getUserById, deleteUser, updateUserStatus,
   getExercises, createExercise, updateExercise, deleteExercise,
+  getFeedback,
+  getMonthlyAnalytics, getYearlyAnalytics, getDailyAnalytics, getAnalyticsYears,
 } from "../controller/adminController.js";
 
 
@@ -36,6 +38,15 @@ router.get("/users", adminProtect, getUsers);
 router.get("/users/:id", adminProtect, getUserById);
 router.delete("/users/:id", adminProtect, deleteUser);
 router.patch("/users/:id/status", adminProtect, updateUserStatus);
+
+// feedback tab (paginated, newest first)
+router.get("/feedback", adminProtect, getFeedback);
+
+// historical analytics (real data, Manila-aligned)
+router.get("/analytics/years", adminProtect, getAnalyticsYears);
+router.get("/analytics/monthly", adminProtect, getMonthlyAnalytics);
+router.get("/analytics/yearly", adminProtect, getYearlyAnalytics);
+router.get("/analytics/daily", adminProtect, getDailyAnalytics);
 
 router.get("/exercises", adminProtect, getExercises);
 router.post("/exercises", adminProtect, createExercise);

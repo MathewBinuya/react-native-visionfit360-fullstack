@@ -1,56 +1,57 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
-import { Avatar, StateBlock } from "../components/ui";
+import { Avatar, StateBlock, Pagination, TableScroll } from "../components/ui";
 import api from "../lib/api";
 import { relativeTime, displayName, accountStatus, lastSeen, ACCOUNT_ACTIVE_DAYS } from "../lib/format";
 
-const SORTS = {
-  newest: { label: "Newest users", fn: (a, b) => new Date(b.createdAt) - new Date(a.createdAt) },
-  oldest: { label: "Oldest users", fn: (a, b) => new Date(a.createdAt) - new Date(b.createdAt) },
-  name_az: { label: "Name A–Z", fn: (a, b) => displayName(a).localeCompare(displayName(b)) },
-  name_za: { label: "Name Z–A", fn: (a, b) => displayName(b).localeCompare(displayName(a)) },
-  recent_active: { label: "Recently active", fn: (a, b) => ts(b.lastActiveAt) - ts(a.lastActiveAt) },
-  least_active: { label: "Least recently active", fn: (a, b) => ts(a.lastActiveAt) - ts(b.lastActiveAt) },
-};
+const PAGE_SIZE = 10;
 
-const ts = (v) => (v ? new Date(v).getTime() : 0);
+const SORTS = {
+  newest: "Newest users",
+  oldest: "Oldest users",
+  name_az: "Name A–Z",
+  name_za: "Name Z–A",
+  recent_active: "Recently active",
+  least_active: "Least recently active",
+};
 
 export default function Users() {
   const navigate = useNavigate();
-  const [users, setUsers] = useState(null);
+  const [resp, setResp] = useState(null); // { data, page, totalPages, total, ... }
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState("newest");
   const [statusFilter, setStatusFilter] = useState("all"); // all | active | inactive
+  const [page, setPage] = useState(1);
 
-  const loadUsers = useCallback(() => {
+  const load = useCallback((params) => {
+    setLoading(true);
     api
-      .get("/users")
-      .then((res) => { setUsers(res.data); setError(""); })
-      .catch((err) => setError(err.response?.data?.message || "Failed to load users"));
+      .get("/users", { params })
+      .then((res) => { setResp(res.data); setError(""); })
+      .catch((err) => setError(err.response?.data?.message || "Failed to load users"))
+      .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => { loadUsers(); }, [loadUsers]);
+  // debounce search; react to filter/page changes
+  const first = useRef(true);
+  useEffect(() => {
+    const params = {
+      page,
+      limit: PAGE_SIZE,
+      sort,
+      search: search.trim() || undefined,
+      status: statusFilter === "all" ? undefined : statusFilter,
+    };
+    const t = setTimeout(() => load(params), first.current ? 0 : 250);
+    first.current = false;
+    return () => clearTimeout(t);
+  }, [page, sort, search, statusFilter, load]);
 
-  const visible = useMemo(() => {
-    if (!users) return [];
-    const q = search.trim().toLowerCase();
-    let list = users.filter((u) => {
-      if (q) {
-        const hay = `${u.name || ""} ${u.username || ""} ${u.email || ""}`.toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      if (statusFilter !== "all") {
-        const isActive = accountStatus(u).active;
-        if (statusFilter === "active" && !isActive) return false;
-        if (statusFilter === "inactive" && isActive) return false;
-      }
-      return true;
-    });
-    return list.sort(SORTS[sort].fn);
-  }, [users, search, sort, statusFilter]);
+  const users = resp?.data || [];
 
   return (
     <div className="layout">
@@ -66,14 +67,14 @@ export default function Users() {
             className="search-input"
             placeholder="Search by name, username or email…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { setPage(1); setSearch(e.target.value); }}
           />
-          <select className="select" value={sort} onChange={(e) => setSort(e.target.value)}>
-            {Object.entries(SORTS).map(([k, v]) => (
-              <option key={k} value={k}>{v.label}</option>
+          <select className="select" value={sort} onChange={(e) => { setPage(1); setSort(e.target.value); }}>
+            {Object.entries(SORTS).map(([k, label]) => (
+              <option key={k} value={k}>{label}</option>
             ))}
           </select>
-          <select className="select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <select className="select" value={statusFilter} onChange={(e) => { setPage(1); setStatusFilter(e.target.value); }}>
             <option value="all">All statuses</option>
             <option value="active">Active only</option>
             <option value="inactive">Inactive only</option>
@@ -82,55 +83,63 @@ export default function Users() {
 
         <div className="card">
           <StateBlock
-            loading={!users && !error}
+            loading={loading && !resp}
             error={error}
-            empty={users && visible.length === 0}
-            emptyText={users && users.length ? "No users match your filters." : "No users yet."}
+            empty={resp && users.length === 0}
+            emptyText={search || statusFilter !== "all" ? "No users match your filters." : "No users yet."}
           >
-            <table className="rows">
-              <thead>
-                <tr>
-                  <th>User</th>
-                  <th>Email</th>
-                  <th>Status</th>
-                  <th>Last active</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {visible.map((u) => {
-                  const st = accountStatus(u);
-                  const seen = lastSeen(u);
-                  return (
-                    <tr key={u._id} className="clickable" onClick={() => navigate(`/users/${u._id}`)}>
-                      <td>
-                        <div className="user-cell">
-                          <Avatar user={u} />
-                          <div className="user-id">
-                            <span className="user-id-name">{displayName(u)}</span>
-                            <span className="user-id-handle">@{u.username}</span>
+            <TableScroll>
+              <table className="rows">
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Email</th>
+                    <th className="col-center">Status</th>
+                    <th className="col-right">Last active</th>
+                    <th className="col-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((u) => {
+                    const st = accountStatus(u);
+                    const seen = lastSeen(u);
+                    return (
+                      <tr key={u._id} className="clickable" onClick={() => navigate(`/users/${u._id}`)}>
+                        <td>
+                          <div className="user-cell">
+                            <Avatar user={u} />
+                            <div className="user-id">
+                              <span className="user-id-name">{displayName(u)}</span>
+                              <span className="user-id-handle">@{u.username}</span>
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                      <td className="muted">{u.email}</td>
-                      <td><span className={`badge ${st.className}`}>{st.label}</span></td>
-                      <td className="muted">{seen ? relativeTime(seen) : "Never"}</td>
-                      <td>
-                        <button
-                          className="btn-ghost"
-                          onClick={(e) => { e.stopPropagation(); navigate(`/users/${u._id}`); }}
-                        >
-                          View
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        </td>
+                        <td className="muted">{u.email}</td>
+                        <td className="col-center"><span className={`badge ${st.className}`}>{st.label}</span></td>
+                        <td className="muted col-right">{seen ? relativeTime(seen) : "Never"}</td>
+                        <td className="col-right">
+                          <button
+                            className="btn-ghost"
+                            onClick={(e) => { e.stopPropagation(); navigate(`/users/${u._id}`); }}
+                          >
+                            View
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </TableScroll>
           </StateBlock>
-          {users && visible.length > 0 && (
-            <div className="table-foot">{visible.length} of {users.length} users</div>
+          {resp && users.length > 0 && (
+            <Pagination
+              page={resp.page}
+              totalPages={resp.totalPages}
+              total={resp.total}
+              label="users"
+              onPage={setPage}
+            />
           )}
         </div>
       </div>

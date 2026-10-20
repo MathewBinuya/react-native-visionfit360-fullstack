@@ -4,6 +4,8 @@ import Dashboard from "./pages/Dashboard";
 import Users from "./pages/Users";
 import UsersPerExercise from "./pages/UsersPerExercise";
 import UserDetail from "./pages/UserDetail";
+import Feedback from "./pages/Feedback";
+import Analytics from "./pages/Analytics";
 import Security from "./pages/Security";
 import "./App.css";
 
@@ -21,6 +23,8 @@ export default function App() {
         <Route path="/users" element={<Protected><Users /></Protected>} />
         <Route path="/users-per-exercise" element={<Protected><UsersPerExercise /></Protected>} />
         <Route path="/users/:id" element={<Protected><UserDetail /></Protected>} />
+        <Route path="/feedback" element={<Protected><Feedback /></Protected>} />
+        <Route path="/analytics" element={<Protected><Analytics /></Protected>} />
         <Route path="/security" element={<Protected><Security /></Protected>} />
         <Route path="*" element={<Navigate to="/login" />} />
       </Routes>

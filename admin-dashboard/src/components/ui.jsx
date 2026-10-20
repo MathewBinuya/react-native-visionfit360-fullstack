@@ -51,6 +51,46 @@ export function Avatar({ user, size = 32 }) {
   );
 }
 
+// Wrap any wide table so it scrolls horizontally instead of squeezing columns
+// or breaking the page layout on narrow screens.
+export function TableScroll({ children }) {
+  return <div className="table-scroll">{children}</div>;
+}
+
+// Reusable pager used by every paginated list (Users, Users per Exercise,
+// Workout History, Feedback). First/last pages disable the matching arrow.
+export function Pagination({ page, totalPages, onPage, total, label = "records" }) {
+  if (!totalPages || totalPages <= 1) {
+    return total != null ? (
+      <div className="pager">
+        <span className="pager-info">{total} {label}</span>
+      </div>
+    ) : null;
+  }
+  return (
+    <div className="pager">
+      <button
+        className="btn-ghost"
+        disabled={page <= 1}
+        onClick={() => onPage(page - 1)}
+      >
+        ← Previous
+      </button>
+      <span className="pager-info">
+        Page {page} of {totalPages}
+        {total != null ? ` · ${total} ${label}` : ""}
+      </span>
+      <button
+        className="btn-ghost"
+        disabled={page >= totalPages}
+        onClick={() => onPage(page + 1)}
+      >
+        Next →
+      </button>
+    </div>
+  );
+}
+
 export function RatingStars({ value }) {
   const full = Math.round(value);
   return (
