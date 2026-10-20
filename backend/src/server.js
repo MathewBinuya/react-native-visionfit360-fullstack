@@ -18,6 +18,11 @@ const PORT = process.env.PORT || 3000;
 
 // job.start();
 
+// Render terminates TLS at a proxy and forwards via X-Forwarded-For. Trusting the
+// first hop lets req.ip resolve to the real client so the auth rate limiters key
+// off each user, not the shared proxy IP.
+app.set("trust proxy", 1);
+
 app.use(cors());              // ← MOVED UP: must come before routes
 app.use(express.json());      // keep this once, before routes
 
