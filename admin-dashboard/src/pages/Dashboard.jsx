@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
-import { StateBlock, PresenceBadge, Avatar, RatingStars } from "../components/ui";
+import { StateBlock, PresenceBadge, Avatar } from "../components/ui";
 import { LineChart, BarChart } from "../components/Charts";
 import api from "../lib/api";
 import { exerciseLabel, relativeTime, displayName } from "../lib/format";
@@ -219,37 +219,6 @@ export default function Dashboard() {
               </StateBlock>
             </Panel>
           </div>
-
-          {/* feedback */}
-          <Panel
-            title="Feedback"
-            action={
-              <div className="feedback-score">
-                <span className="score-num">{data?.feedback?.avgRating || 0}</span>
-                <div>
-                  <RatingStars value={data?.feedback?.avgRating || 0} />
-                  <div className="panel-meta">{data?.feedback?.count || 0} reviews</div>
-                </div>
-              </div>
-            }
-          >
-            <StateBlock empty={!data?.feedback?.recent?.length} emptyText="No feedback submitted yet.">
-              <ul className="feedback-list">
-                {data?.feedback?.recent?.map((f) => (
-                  <li key={f._id} className="feedback-item">
-                    <div className="feedback-item-head">
-                      <span className="user-cell clickable" onClick={() => goUser(f.user?._id)}>
-                        <Avatar user={f.user} /> {displayName(f.user)}
-                      </span>
-                      <RatingStars value={f.rating} />
-                      <span className="person-time">{relativeTime(f.createdAt)}</span>
-                    </div>
-                    {f.comment ? <p className="feedback-comment">{f.comment}</p> : null}
-                  </li>
-                ))}
-              </ul>
-            </StateBlock>
-          </Panel>
         </StateBlock>
       </div>
     </div>
