@@ -103,9 +103,6 @@ export default function Dashboard() {
   const recentList = (presence?.users || []).filter((u) => u.status === "recently_active");
   const people = [...activeList, ...recentList].slice(0, PEOPLE_PREVIEW);
 
-  const rep = data?.workouts?.repQuality;
-  const repTotal = rep ? (rep.good || 0) + (rep.bad || 0) : 0;
-
   const demo = data?.demographics || {};
   const body = demo.body;
   const exercisePreview = (data?.workouts?.exerciseUsage || []).slice(0, EXERCISE_PREVIEW);
@@ -118,10 +115,9 @@ export default function Dashboard() {
           <div>
             <h1 className="page-title">Overview</h1>
             <p className="page-sub">
-              {data?.generatedAt ? `Updated ${relativeTime(data.generatedAt)}` : "Loading…"}
-              {presence && (
-                <> · <span className="live-dot" /> {counts?.active ?? 0} active now</>
-              )}
+              {presence ? (
+                <><span className="live-dot" /> {counts?.active ?? 0} active now</>
+              ) : "Loading…"}
             </p>
           </div>
           <div className="range-toggle" role="group" aria-label="Trend range">
@@ -140,11 +136,6 @@ export default function Dashboard() {
             <Kpi label={`Active · ${k?.accountActiveDays ?? 7} days`} value={k?.activeAccounts} hint={`${k?.inactiveAccounts ?? 0} inactive`} />
             <Kpi label="Active now" value={counts?.active} hint="seen in last 2 min" />
             <Kpi label={`Sessions · ${range} days`} value={k?.sessionsInRange} hint={`completed · ${k?.totalSessions ?? 0} all time`} />
-            <Kpi
-              label="Form quality"
-              value={repTotal ? `${Math.round((rep.good / repTotal) * 100)}%` : null}
-              hint={repTotal ? `${rep.good} good · ${rep.bad} bad reps` : "no AR data yet"}
-            />
             <Kpi label="Avg rating" value={k?.avgRating || null} hint={`${k?.feedbackCount ?? 0} reviews`} />
           </div>
 
