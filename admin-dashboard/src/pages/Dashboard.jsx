@@ -116,7 +116,7 @@ export default function Dashboard() {
             <h1 className="page-title">Overview</h1>
             <p className="page-sub">
               {presence ? (
-                <><span className="live-dot" /> {counts?.active ?? 0} active now</>
+                <><span className="live-dot" /> Active now</>
               ) : "Loading…"}
             </p>
           </div>
