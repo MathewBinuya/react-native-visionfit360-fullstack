@@ -118,7 +118,7 @@ const handleSignUp = async () => {
               <TextInput
                 style={styles.input}
                 placeholder="Username"
-                placeholderTextColor={COLORS.black}
+                placeholderTextColor={COLORS.placeholderText}
                 onChangeText={setUsername} 
                 value={username}
                 autoCapitalize="none"
@@ -140,7 +140,7 @@ const handleSignUp = async () => {
               style={styles.input}
               placeholder="Email"
               value={email}
-              placeholderTextColor={COLORS.black}
+              placeholderTextColor={COLORS.placeholderText}
               onChangeText={setEmail}
               keyboardType="email-address"
               autoCapitalize="none"
@@ -164,7 +164,7 @@ const handleSignUp = async () => {
             <TextInput
               style={styles.input}
               placeholder="Password"
-              placeholderTextColor={COLORS.black}
+              placeholderTextColor={COLORS.placeholderText}
               value={password}
               onChangeText={setPassword}
               secureTextEntry={!showPassword}

@@ -20,6 +20,7 @@ const styles = StyleSheet.create({
     padding: 16, marginBottom: 14,
   },
   cardTitle: { fontSize: 12, color: COLORS.placeholderText, fontFamily: FONT, letterSpacing: 0.3 },
+  cardSub: { fontSize: 12, color: COLORS.black, fontFamily: FONT, marginTop: 4, lineHeight: 16 },
   heroRow: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", marginTop: 6, marginBottom: 14 },
   hero: { fontSize: 26, fontWeight: "600", color: COLORS.black, fontFamily: FONT },
   heroFrom: { fontSize: 15, color: COLORS.placeholderText, fontWeight: "400" },
@@ -63,8 +64,13 @@ const styles = StyleSheet.create({
   liftSub: { fontSize: 11, color: COLORS.placeholderText, fontFamily: FONT, marginTop: 1 },
   liftGain: { fontSize: 11, color: COLORS.black, fontFamily: FONT, opacity: 0.55 },
   liftKg: { fontSize: 14, fontWeight: "600", color: COLORS.black, fontFamily: FONT, minWidth: 52, textAlign: "right" },
-  showMore: { alignSelf: "center", paddingTop: 10 },
-  showMoreText: { fontSize: 12, fontWeight: "600", color: COLORS.black, fontFamily: FONT },
+  showMore: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    marginTop: 12, paddingVertical: 11,
+    borderWidth: 1, borderColor: COLORS.border, borderRadius: 10,
+    backgroundColor: COLORS.inputBackground,
+  },
+  showMoreText: { fontSize: 13, fontWeight: "600", color: COLORS.black, fontFamily: FONT },
 
   footnote: { fontSize: 11, color: COLORS.placeholderText, textAlign: "center", alignSelf: "center", marginTop: 4, fontFamily: FONT },
 

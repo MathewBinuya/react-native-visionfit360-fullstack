@@ -51,15 +51,16 @@ export const AR_EXERCISES = [
     // AscendAPI: dumbbell standing biceps curl
     ascend: { id: "3s4NnTh" },
     instructions: [
-      "Face the camera, arm hanging straight down and clearly visible.",
+      "Stand at a slight angle to the camera, arm hanging straight down and clearly visible.",
       "Keep your upper arm pinned to your side — only the forearm moves.",
       "Curl your hand up toward your shoulder.",
       "Lower all the way back to full extension to count the rep.",
     ],
     tips: [
-      "Face the camera with your arm clearly visible",
+      "Stand at a slight angle to the camera (not dead-on) — your elbow bend reads most clearly this way",
+      "Keep your shoulder, elbow and wrist all in frame",
       "Keep your upper arm still — only your forearm moves",
-      "Curl all the way up, then fully extend down",
+      "Curl all the way up, then fully extend down before the next rep",
       "One arm, both arms, or alternating all work — each arm is counted on its own",
     ],
   },
@@ -198,29 +199,6 @@ export const AR_EXERCISES = [
       "Face the camera, full body visible",
       "Lift one leg out to the side, clearly off the ground",
       "Lower it fully before raising again",
-    ],
-  },
-  {
-    key: "kneeraise",
-    label: "Knee Raises",
-    group: "Core",
-    target: ["Lower Abs", "Hip Flexors"],
-    icon: "body-outline",
-    targetReps: 12,
-    working: true,
-    equipment: "Bodyweight",
-    // AscendAPI: high knee against wall — standing knee-to-chest drive
-    ascend: { id: "ealLwvX", approx: true },
-    instructions: [
-      "Stand at a 45° angle so the camera sees your side.",
-      "Lift the knee nearest the camera up toward your chest.",
-      "Lower your foot back to the floor.",
-      "Turn to face the other way to switch legs.",
-    ],
-    tips: [
-      "Stand at a 45° angle to the camera",
-      "Lift the knee facing the camera up toward your chest",
-      "Turn to the other side to switch legs",
     ],
   },
   {

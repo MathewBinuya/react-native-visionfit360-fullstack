@@ -53,6 +53,18 @@ const styles = StyleSheet.create({
   howText: { fontSize: 11, fontWeight: "600", color: COLORS.button, fontFamily: "GeneralSans-Variable" },
   soon: { fontSize: 10, color: COLORS.placeholderText, marginTop: 2, fontFamily: "GeneralSans-Variable" },
 
+  // attribution for the bundled exercise icons (CC BY-SA 4.0)
+  credit: {
+    width: "100%",
+    textAlign: "center",
+    fontSize: 10,
+    lineHeight: 14,
+    color: COLORS.placeholderText,
+    marginTop: 8,
+    paddingHorizontal: 8,
+    fontFamily: "GeneralSans-Variable",
+  },
+
   // floating "scroll for more" cue
   scrollCue: {
     position: "absolute",

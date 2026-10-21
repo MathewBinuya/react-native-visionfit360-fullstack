@@ -105,7 +105,17 @@ export const useAuthStore = create((set) => ({
 
       const data = await response.json();
 
-      if (!response.ok) throw new Error(data.message || "Something went wrong");
+      if (!response.ok) {
+        set({ isLoading: false });
+        // 403 = correct password but email not verified yet. Surface it so the
+        // login screen can send the user straight to the verification step.
+        return {
+          success: false,
+          error: data.message || "Something went wrong",
+          needsVerification: response.status === 403,
+          email: data.email,
+        };
+      }
 
       await AsyncStorage.setItem("user", JSON.stringify(data.user));
       await AsyncStorage.setItem("token", data.token);

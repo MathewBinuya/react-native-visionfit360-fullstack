@@ -13,7 +13,6 @@ import {
   NOTIF_SETTINGS_KEY, MORNING, EVENING, TIMEZONE,
 } from '../../lib/notifications'
 import { reconcileInbox, unreadCount } from '../../lib/notifInbox'
-import { formatPct } from '../../lib/progress'
 import ActivityCard from '../../components/ActivityCard'
 
 // one-time, per-device flag so the first-run notification ask shows only once
@@ -114,7 +113,6 @@ export default function Home() {
   //   derived stats
   const workoutsDone = summary ? summary.totalWorkouts : workouts.length;
   const volumeThisWeek = summary?.thisWeek.volume ?? 0;
-  const volumeChange = formatPct(summary?.volumeChangePct);
 
   // BMI from stored height/weight
   const bmiData = () => {
@@ -197,12 +195,6 @@ export default function Home() {
           <TouchableOpacity style={styles.statCard} onPress={() => router.push("/progress")} activeOpacity={0.7}>
             <Text style={styles.statLabel}>Workouts done</Text>
             <Text style={styles.statValue}>{workoutsDone}</Text>
-            {summary && (
-              <Text style={styles.statSub}>
-                {summary.thisWeek.workouts} this week
-                {summary.weekStreak >= 2 ? ` · ${summary.weekStreak}-wk streak` : ""}
-              </Text>
-            )}
           </TouchableOpacity>
           <TouchableOpacity style={styles.statCard} onPress={() => router.push("/progress")} activeOpacity={0.7}>
             <Text style={styles.statLabel}>Volume this week</Text>
@@ -210,11 +202,6 @@ export default function Home() {
               {volumeThisWeek.toLocaleString()}
               <Text style={styles.statUnit}> kg</Text>
             </Text>
-            {summary && (
-              <Text style={styles.statSub}>
-                {volumeChange ? `${volumeChange} vs last week` : "vs last week: —"}
-              </Text>
-            )}
           </TouchableOpacity>
         </View>
         <TouchableOpacity style={styles.progressLink} onPress={() => router.push("/progress")}>
