@@ -12,14 +12,18 @@ const EXERCISE_PREVIEW = 8;     // top-N exercises shown on the dashboard (full 
 const PEOPLE_PREVIEW = 8;
 
 const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
-const GENDER_ORDER = ["male", "female", "other", "Not specified"];
-const BMI_ORDER = ["Underweight", "Normal", "Overweight", "Obese", "Not specified"];
+const NOT_SPECIFIED = "Not specified";
+const GENDER_ORDER = ["male", "female", "other"];
+const BMI_ORDER = ["Underweight", "Normal", "Overweight", "Obese"];
 
-// turn a [{_id,count}] breakdown into ordered BarChart rows
+// turn a [{_id,count}] breakdown into ordered BarChart rows.
+// Users with no data on file ("Not specified") are dropped from the view.
 const toBars = (arr, order, labelFn = (x) => x) => {
   const map = new Map((arr || []).map((d) => [d._id, d.count]));
   const rows = order.filter((k) => map.has(k)).map((k) => ({ label: labelFn(k), value: map.get(k) }));
-  for (const d of arr || []) if (!order.includes(d._id)) rows.push({ label: labelFn(d._id), value: d.count });
+  for (const d of arr || []) {
+    if (!order.includes(d._id) && d._id !== NOT_SPECIFIED) rows.push({ label: labelFn(d._id), value: d.count });
+  }
   return rows;
 };
 
@@ -184,7 +188,7 @@ export default function Dashboard() {
 
           {/* demographics + logins */}
           <div className="grid-2">
-            <Panel title="Demographics" meta="missing data shown as Not specified">
+            <Panel title="Demographics" meta="excludes users with no data on file">
               <div className="subhead">Gender</div>
               <Breakdown rows={toBars(demo.gender, GENDER_ORDER, cap)} />
               <div className="subhead">BMI category</div>
