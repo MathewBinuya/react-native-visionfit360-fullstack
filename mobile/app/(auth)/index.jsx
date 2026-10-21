@@ -21,10 +21,21 @@ const {isLoading, login, isCheckingAuth} = useAuthStore();
 const handleLogin = async () => {
   const result = await login(email,password);
   if(!result.success) {
+    // not verified yet -> take them to the verification screen instead of a dead-end alert
+    if (result.needsVerification) {
+      showAlert("Verify your email", result.error, [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Verify now",
+          onPress: () => router.push({ pathname: "/(auth)/verify-email", params: { email: result.email || email.trim() } }),
+        },
+      ]);
+      return;
+    }
     showAlert("Error", result.error);
     return;
   }
-  
+
   const user = useAuthStore.getState().user;
   if (user?.onBoardingComplete) {
     router.replace("/(tabs)/home");          
@@ -68,7 +79,7 @@ const handleLogin = async () => {
               <TextInput 
                 style={styles.input}
                 placeholder="Enter your email"
-                placeholderTextColor={COLORS.black}
+                placeholderTextColor={COLORS.placeholderText}
                 value={email}
                 onChangeText={setEmail}
                 keyboardType="email-address"
@@ -89,7 +100,7 @@ const handleLogin = async () => {
                   <TextInput
                     style={styles.input}
                     placeholder="Enter your password"
-                    placeholderTextColor={COLORS.black}
+                    placeholderTextColor={COLORS.placeholderText}
                     value={password}
                     onChangeText={setPassword}
                     secureTextEntry={!showPassword}

@@ -15,6 +15,7 @@ export default function VerifyEmail() {
   const [code, setCode] = useState(["", "", "", "", "", ""]);
   const [isVerifying, setIsVerifying] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(900); // 15 min, matches backend expiry
+  const [resendIn, setResendIn] = useState(60);        // 60s, matches backend resend cooldown
   const [isResending, setIsResending] = useState(false);
 
   const inputRefs = useRef([]);
@@ -34,6 +35,14 @@ export default function VerifyEmail() {
     const timer = setInterval(() => setSecondsLeft((s) => s - 1), 1000);
     return () => clearInterval(timer);
   }, [secondsLeft]);
+
+  // Resend becomes available after the 60s cooldown — independent of the 15-min
+  // code expiry, so a user who never got the email isn't stuck waiting.
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const timer = setInterval(() => setResendIn((s) => s - 1), 1000);
+    return () => clearInterval(timer);
+  }, [resendIn]);
 
   const formatTime = (s) => {
     const m = Math.floor(s / 60).toString().padStart(2, "0");
@@ -99,6 +108,7 @@ export default function VerifyEmail() {
     }
 
     setSecondsLeft(900);
+    setResendIn(60);
     setCode(["", "", "", "", "", ""]);
     inputRefs.current[0]?.focus();
   };
@@ -149,16 +159,22 @@ export default function VerifyEmail() {
               )}
             </TouchableOpacity>
 
-            <View style={styles.resendRow}>
-              {secondsLeft > 0 ? (
-                <Text style={styles.timerText}>Code expires in {formatTime(secondsLeft)}</Text>
-              ) : isResending ? (
+            <View style={[styles.resendRow, { flexDirection: "column", alignItems: "center", gap: 8 }]}>
+              <Text style={styles.timerText}>
+                {secondsLeft > 0 ? `Code expires in ${formatTime(secondsLeft)}` : "Your code has expired."}
+              </Text>
+              {isResending ? (
                 <ActivityIndicator color={COLORS.button} size="small" />
+              ) : resendIn > 0 ? (
+                <Text style={styles.timerText}>Resend code in {resendIn}s</Text>
               ) : (
                 <TouchableOpacity onPress={handleResend}>
                   <Text style={styles.resendLink}>{"Didn't get it? Resend code"}</Text>
                 </TouchableOpacity>
               )}
+              <TouchableOpacity onPress={() => router.replace("/(auth)/signup")} hitSlop={8}>
+                <Text style={styles.timerText}>Wrong email? Go back</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </ScrollView>

@@ -18,8 +18,8 @@ const LIFTS_PREVIEW = 4;
 const GUIDE_STEPS = [
   {
     icon: "barbell-outline",
-    title: "Weekly volume",
-    text: "Total weight you moved in a week (reps × weight, added up across every set). If it rises over the weeks, you're getting stronger.",
+    title: "Total weight lifted",
+    text: "The total weight you moved in a week (each set's reps × weight, all added up). If it rises week over week, you're getting stronger.",
   },
   {
     icon: "swap-horizontal-outline",
@@ -41,21 +41,7 @@ const GUIDE_STEPS = [
     title: "Heaviest lifts & records",
     text: "Your best weight for each exercise. The \"+\" figure shows how much you beat your previous best.",
   },
-  {
-    icon: "chatbubble-ellipses-outline",
-    title: "Coach notes",
-    text: "Short tips based on your history. Increase weight only when your form stays good.",
-  },
 ];
-
-const INSIGHT_ICONS = {
-  volume_up: "trending-up",
-  volume_down: "trending-down",
-  volume_steady: "remove-outline",
-  plateau: "barbell-outline",
-  streak: "flame-outline",
-  inactive: "time-outline",
-};
 
 // One series, so no legend — the card title names it. Tap a bar to read its week.
 function WeeklyBars({ weeks, field, selected, onSelect }) {
@@ -199,25 +185,10 @@ export default function Progress() {
 
     return (
       <>
-        {/* progressive-overload feedback */}
-        {data.insights?.length > 0 && (
-          <View style={styles.card}>
-            <Text style={[styles.cardTitle, { marginBottom: 4 }]}>COACH NOTES</Text>
-            {data.insights.map((ins, i) => (
-              <View key={i}>
-                {i > 0 && <View style={styles.divider} />}
-                <View style={styles.insightRow}>
-                  <Ionicons name={INSIGHT_ICONS[ins.type] || "information-circle-outline"} size={18} color={COLORS.black} />
-                  <Text style={styles.insightText}>{ins.message}</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
-
         {/* weekly volume */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>WEEKLY VOLUME</Text>
+          <Text style={styles.cardTitle}>TOTAL WEIGHT LIFTED</Text>
+          <Text style={styles.cardSub}>All the weight you lifted this week (each set's reps × weight, added up).</Text>
           <View style={styles.heroRow}>
             <View>
               <Text style={styles.hero}>
@@ -245,12 +216,13 @@ export default function Progress() {
         {/* weekly workouts / consistency */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>WORKOUTS PER WEEK</Text>
+          <Text style={styles.cardSub}>How many workouts you finished, vs. your weekly goal.</Text>
           <View style={styles.heroRow}>
             <View>
               <Text style={styles.hero}>
                 <Text style={styles.heroFrom}>{s.lastWeek.workouts} → </Text>
                 {s.thisWeek.workouts}
-                <Text style={styles.heroUnit}> of {s.weeklyTarget} target</Text>
+                <Text style={styles.heroUnit}> of {s.weeklyTarget} goal</Text>
               </Text>
               <Text style={styles.caption}>Last week → this week so far</Text>
             </View>
@@ -267,15 +239,15 @@ export default function Progress() {
           <View style={styles.statGrid}>
             <View style={styles.statCell}>
               <Text style={styles.statValue}>{s.weekStreak} wk{s.weekStreak === 1 ? "" : "s"}</Text>
-              <Text style={styles.statLabel}>Weekly streak</Text>
+              <Text style={styles.statLabel}>Weeks in a row</Text>
             </View>
             <View style={styles.statCell}>
               <Text style={styles.statValue}>{s.avgWorkoutsPerWeek}</Text>
-              <Text style={styles.statLabel}>Avg / week (last 4)</Text>
+              <Text style={styles.statLabel}>Avg workouts per week</Text>
             </View>
             <View style={styles.statCell}>
               <Text style={styles.statValue}>{s.activeWeeks} of {weeks.length}</Text>
-              <Text style={styles.statLabel}>Weeks trained</Text>
+              <Text style={styles.statLabel}>Weeks you trained</Text>
             </View>
             <View style={styles.statCell}>
               <Text style={styles.statValue}>
@@ -327,10 +299,11 @@ export default function Progress() {
                 </View>
               ))}
               {data.records.length > LIFTS_PREVIEW && (
-                <TouchableOpacity style={styles.showMore} onPress={() => setShowAllLifts(!showAllLifts)} hitSlop={6}>
+                <TouchableOpacity style={styles.showMore} onPress={() => setShowAllLifts(!showAllLifts)} activeOpacity={0.7} hitSlop={6}>
                   <Text style={styles.showMoreText}>
-                    {showAllLifts ? "Show less" : `Show all ${data.records.length}`}
+                    {showAllLifts ? "Show fewer" : `Show all ${data.records.length} lifts`}
                   </Text>
+                  <Ionicons name={showAllLifts ? "chevron-up" : "chevron-down"} size={16} color={COLORS.black} />
                 </TouchableOpacity>
               )}
             </>

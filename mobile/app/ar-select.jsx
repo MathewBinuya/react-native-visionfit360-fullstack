@@ -7,6 +7,8 @@ import { Ionicons } from "@expo/vector-icons"
 import COLORS from "../constants/colors"
 import styles from '../assets/styles/arselect.style'
 import { AR_EXERCISES } from '../lib/exercises'
+import ExerciseIcon from '../components/ExerciseIcon'
+import { EXERCISE_ICON_CREDIT } from '../lib/exerciseIcons'
 
 const GRID_PADDING = 16;
 const GRID_GAP = 12;
@@ -61,7 +63,7 @@ export default function ArSelect() {
             onPress={() => router.push(`/repvision-guide?exercise=${ex.key}`)}
             activeOpacity={0.8}
           >
-            <Ionicons name={ex.icon} size={30} color={COLORS.button} />
+            <ExerciseIcon exerciseKey={ex.key} fallback={ex.icon} size={56} color={COLORS.button} />
             <Text style={styles.cardLabel} numberOfLines={1}>{ex.label}</Text>
             <Text style={styles.cardGroup}>{ex.group}</Text>
             {ex.working === false ? (
@@ -74,6 +76,7 @@ export default function ArSelect() {
             )}
           </TouchableOpacity>
         ))}
+        <Text style={styles.credit}>{EXERCISE_ICON_CREDIT}</Text>
       </ScrollView>
 
       {/* floating "scroll for more" cue — sits above the device nav/gesture bar
