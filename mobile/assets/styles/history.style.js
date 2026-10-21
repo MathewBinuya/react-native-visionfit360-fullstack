@@ -14,9 +14,36 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 17, fontWeight: "600", color: COLORS.black, fontFamily: "GeneralSans-Variable" },
   empty: { color: COLORS.placeholderText, textAlign: "center", marginTop: 40, fontFamily: "GeneralSans-Variable" },
 
+  // sort toggle (newest / oldest)
+  sortBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.inputBackground,
+  },
+  sortText: { fontSize: 12, fontWeight: "600", color: COLORS.button, fontFamily: "GeneralSans-Variable" },
+
+  // date section header
+  sectionHeader: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: COLORS.placeholderText,
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+    marginTop: 14,
+    marginBottom: 8,
+    marginLeft: 2,
+    fontFamily: "GeneralSans-Variable",
+  },
+
   historyCard: {
     backgroundColor: COLORS.cards,
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: COLORS.border,
     padding: 14,
@@ -24,30 +51,41 @@ const styles = StyleSheet.create({
   },
   cardTop: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 8,
+    alignItems: "center",
+    gap: 12,
+  },
+  iconBadge: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: COLORS.inputBackground,
+    alignItems: "center",
+    justifyContent: "center",
   },
   cardTitle: { fontSize: 15, fontWeight: "600", color: COLORS.black, fontFamily: "GeneralSans-Variable" },
-  cardDate: { fontSize: 12, color: COLORS.placeholderText, marginTop: 2, fontFamily: "GeneralSans-Variable" },
+  cardMeta: { fontSize: 12.5, color: COLORS.placeholderText, marginTop: 2, fontFamily: "GeneralSans-Variable" },
 
-  volumeBadge: {
+  // glanceable summary chips
+  chipsRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 },
+  chip: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 5,
     backgroundColor: COLORS.inputBackground,
-    alignSelf: "flex-start",
-    paddingVertical: 4,
+    paddingVertical: 5,
     paddingHorizontal: 10,
     borderRadius: 8,
-    marginBottom: 12,
   },
-  volumeText: { fontSize: 12, color: COLORS.button, marginLeft: 6, fontWeight: "600", fontFamily: "GeneralSans-Variable" },
+  chipWarn: { backgroundColor: "#FFF4E5" },
+  chipText: { fontSize: 12, color: COLORS.button, fontWeight: "600", fontFamily: "GeneralSans-Variable" },
 
+  // expanded detail (each exercise block's top border is the divider)
+  detail: { marginTop: 4 },
   exerciseBlock: {
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
-    paddingTop: 8,
-    marginTop: 4,
+    paddingTop: 10,
+    marginTop: 10,
   },
   exerciseName: { fontSize: 14, fontWeight: "600", color: COLORS.black, marginBottom: 4, fontFamily: "GeneralSans-Variable" },
   setLine: { fontSize: 13, color: COLORS.placeholderText, paddingVertical: 1, fontFamily: "GeneralSans-Variable" },

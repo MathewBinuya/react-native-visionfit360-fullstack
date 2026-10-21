@@ -1,6 +1,6 @@
 import { View, Text, TextInput, TouchableOpacity, ScrollView } from 'react-native'
 import { useState } from 'react'
-import { router } from 'expo-router'
+import { goBack } from '../lib/nav'
 import { Ionicons } from "@expo/vector-icons"
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import COLORS from "../constants/colors"
@@ -30,7 +30,7 @@ export default function Feedback() {
     try {
       await api.post("/feedback", { rating, comment: comment.trim() });
       showAlert("Thank you!", "Your feedback has been sent.", [
-        { text: "OK", onPress: () => router.back() },
+        { text: "OK", onPress: () => goBack() },
       ]);
     } catch (error) {
       showAlert("Error", error.response?.data?.message || "Failed to send feedback");
@@ -53,7 +53,7 @@ export default function Feedback() {
           borderBottomColor: COLORS.border,
         }}
       >
-        <TouchableOpacity onPress={() => router.back()}>
+        <TouchableOpacity onPress={() => goBack()}>
           <Ionicons name="arrow-back" size={24} color={COLORS.black} />
         </TouchableOpacity>
         <Text style={{ fontSize: 18, fontWeight: "700", color: COLORS.black, fontFamily: "GeneralSans-Variable" }}>

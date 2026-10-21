@@ -1,7 +1,7 @@
 import { View, Text, TouchableOpacity, Switch } from 'react-native'
 import { showAlert } from '../components/AppAlert'
 import { useState, useEffect } from 'react'
-import { router } from 'expo-router'
+import { goBack } from '../lib/nav'
 import { Ionicons } from "@expo/vector-icons"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import COLORS from "../constants/colors"
@@ -61,7 +61,7 @@ export default function NotificationsScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
+        <TouchableOpacity onPress={() => goBack()}>
           <Ionicons name="arrow-back" size={24} color={COLORS.black} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Notifications</Text>
@@ -71,9 +71,9 @@ export default function NotificationsScreen() {
       <View style={{ padding: 16 }}>
         {/* master toggle */}
         <View style={styles.row}>
-          <View>
+          <View style={{ flex: 1, paddingRight: 12 }}>
             <Text style={styles.rowTitle}>Daily reminders</Text>
-            <Text style={styles.rowSub}>8 AM & 8 PM (Manila) · based on your progress</Text>
+            <Text style={styles.rowSub}>Helpful nudges to keep your workouts on track</Text>
           </View>
           <Switch
             value={enabled}
