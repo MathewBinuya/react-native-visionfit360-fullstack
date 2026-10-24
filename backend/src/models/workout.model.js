@@ -47,6 +47,12 @@ const workoutSchema = new mongoose.Schema({
   // same offline completion is recognised instead of counted twice. Sparse: only
   // offline-completed workouts carry it.
   clientCompletionId: { type: String, index: { unique: true, sparse: true } },
+  // Idempotency key for offline-CREATED workouts synced from the mobile app. The
+  // client generates it once per new workout and sends it on every create attempt,
+  // so a retried/duplicated sync of the same offline creation (dropped response,
+  // app restart, repeated sync pass) is recognised instead of inserted twice.
+  // Sparse: only offline-created workouts carry it.
+  clientWorkoutId: { type: String, index: { unique: true, sparse: true } },
 },
  {timestamps: true},
 );

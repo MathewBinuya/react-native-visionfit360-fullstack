@@ -1,6 +1,12 @@
 import Workout from "../models/workout.model.js";
 import { getUserAnalytics } from "../lib/workoutAnalytics.js";
 import { planCompletion } from "../lib/workoutCompletion.js";
+import { buildWorkoutFields } from "../lib/workoutValidation.js";
+
+// A client-supplied idempotency key must be a plain, bounded string — never an
+// object/array (which Mongo could turn into an operator) or an oversized blob.
+const cleanIdempotencyKey = (v) =>
+  typeof v === "string" && v.length > 0 && v.length <= 64 ? v : null;
 
 // Weekly volume / workout counts / PRs / overload feedback, derived from completed workouts.
 export const getAnalytics = async (req, res) => {
@@ -12,11 +18,41 @@ export const getAnalytics = async (req, res) => {
   }
 };
 
+// Create a workout. Hardened for offline sync + security:
+//   - the request body is NEVER spread into the document; only validated,
+//     whitelisted fields are kept (ownership + completion are server-owned).
+//   - an optional clientWorkoutId makes creation idempotent: if this device
+//     already created this exact workout (recognised by its key), the existing
+//     record is returned instead of inserting a duplicate — so a retried sync
+//     after a dropped response can never create the same workout twice.
 export const createWorkout = async (req, res) => {
   try {
-    const workout = await Workout.create({ ...req.body, user: req.user.id });
+    const clientWorkoutId = cleanIdempotencyKey(req.body?.clientWorkoutId);
+
+    // Idempotent fast-path: already synced under this key → return it unchanged.
+    if (clientWorkoutId) {
+      const existing = await Workout.findOne({ clientWorkoutId, user: req.user.id });
+      if (existing) return res.status(200).json(existing);
+    }
+
+    const built = buildWorkoutFields(req.body, { partial: false });
+    if (!built.ok) return res.status(400).json({ message: built.message });
+
+    const doc = { ...built.value, user: req.user.id };
+    if (clientWorkoutId) doc.clientWorkoutId = clientWorkoutId;
+
+    const workout = await Workout.create(doc);
     res.status(201).json(workout);
   } catch (err) {
+    // Duplicate-key race: two near-simultaneous syncs of the same offline creation.
+    // It is already recorded — resolve the retry as success.
+    if (err?.code === 11000 && cleanIdempotencyKey(req.body?.clientWorkoutId)) {
+      const already = await Workout.findOne({
+        clientWorkoutId: req.body.clientWorkoutId,
+        user: req.user.id,
+      });
+      if (already) return res.status(200).json(already);
+    }
     res.status(400).json({ message: err.message });
   }
 };
@@ -50,19 +86,17 @@ export const getWorkout = async (req, res) => {
   }
 };
 
-// Fields a user may edit. Ownership (`user`) and completion state are never
-// taken from the request body — completion goes through PATCH /:id/complete.
-const EDITABLE_WORKOUT_FIELDS = ["title", "date", "exercises", "durationMinutes", "notes"];
-
+// Update a workout. Like create, the body is validated + whitelisted (never
+// spread): ownership and completion state are server-owned and can't be set here.
+// `partial: true` keeps only the editable fields actually present in the request.
 export const updateWorkout = async (req, res) => {
   try {
-    const updates = {};
-    for (const key of EDITABLE_WORKOUT_FIELDS) {
-      if (req.body?.[key] !== undefined) updates[key] = req.body[key];
-    }
+    const built = buildWorkoutFields(req.body, { partial: true });
+    if (!built.ok) return res.status(400).json({ message: built.message });
+
     const workout = await Workout.findOneAndUpdate(
       { _id: req.params.id, user: req.user.id },
-      { $set: updates },
+      { $set: built.value },
       { new: true, runValidators: true }
     );
     if (!workout) return res.status(404).json({ message: "Not found" });
