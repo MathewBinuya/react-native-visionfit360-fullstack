@@ -293,19 +293,44 @@ export default function Profile() {
         <Text style={styles.usernameText}>@{user?.name || user?.username}</Text>
       </View>
 
-      {/* Name — not editable (greyed to read as locked, no lock icon) */}
+      {/* Name */}
       <Text style={styles.label}>Name</Text>
-      <View style={[styles.readOnlyBox, styles.readOnlyBoxMuted]}>
-        <Text style={styles.readValueMuted}>{form.name || "—"}</Text>
-      </View>
+      {!editing ? (
+        <View style={styles.readOnlyBox}>
+          <Text style={styles.readValue}>{form.name || "—"}</Text>
+        </View>
+      ) : (
+        <View style={styles.inputContainer}>
+          <TextInput
+            style={styles.input}
+            placeholder="Your name"
+            placeholderTextColor={COLORS.placeholderText}
+            value={form.name}
+            onChangeText={(t) => setForm((f) => ({ ...f, name: t }))}
+            maxLength={50}
+            autoCapitalize="words"
+          />
+        </View>
+      )}
 
-      {/* Bio — not editable (greyed) */}
+      {/* Bio */}
       <Text style={styles.label}>Bio</Text>
-      <View style={[styles.readOnlyBox, styles.readOnlyBoxMuted]}>
-        <Text style={styles.readValueMuted}>{form.bio || "—"}</Text>
-      </View>
-      {editing && (
-        <Text style={styles.lockedHint}>Name and bio can’t be changed.</Text>
+      {!editing ? (
+        <View style={styles.readOnlyBox}>
+          <Text style={styles.readValue}>{form.bio || "—"}</Text>
+        </View>
+      ) : (
+        <View style={styles.inputContainer}>
+          <TextInput
+            style={styles.bioInput}
+            placeholder="Tell us a bit about yourself"
+            placeholderTextColor={COLORS.placeholderText}
+            value={form.bio}
+            onChangeText={(t) => setForm((f) => ({ ...f, bio: t }))}
+            maxLength={160}
+            multiline
+          />
+        </View>
       )}
 
       {/* Height */}

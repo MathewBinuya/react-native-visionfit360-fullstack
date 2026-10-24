@@ -47,14 +47,23 @@ export default function PoseTracker() {
   const [weightUnit, setWeightUnit] = useState("kg"); // honours the user's profile preference ('kg' | 'lb')
   const [weight, setWeight] = useState("");           // as TYPED, in the display unit (string)
   const [bestKg, setBestKg] = useState(0);            // personal best (heaviest) — always stored in kg
-  // Always persist metric: convert the typed display value to kg.
-  const weightKg = Math.max(0, Math.round((weightUnit === "lb" ? Number(lbToKg(weight) || 0) : (Number(weight) || 0)) * 10) / 10);
+  // Weight is capped at 50 kg per logged set (keeps PRs/history realistic for this app).
+  const MAX_KG = 50;
+  const maxDisplay = weightUnit === "lb" ? Number(kgToLb(MAX_KG)) : MAX_KG; // 50 kg expressed in the active unit
+  // Always persist metric: convert the typed display value to kg, clamped to [0, MAX_KG].
+  const weightKg = Math.min(MAX_KG, Math.max(0, Math.round((weightUnit === "lb" ? Number(lbToKg(weight) || 0) : (Number(weight) || 0)) * 10) / 10));
   const bestDisplay = bestKg > 0 ? (weightUnit === "lb" ? kgToLb(bestKg) : bestKg) : "";
   const bestKey = `arBestWeight:${user?.id || user?._id || "anon"}:${exercise}`;
   const STEP = weightUnit === "lb" ? 5 : 2.5;          // common plate increment per unit
-  const bumpWeight = (delta) => {                      // steps the DISPLAYED value in its own unit
-    const next = Math.max(0, Math.round(((Number(weight) || 0) + delta) * 10) / 10);
+  const bumpWeight = (delta) => {                      // steps the DISPLAYED value in its own unit, capped at 50 kg
+    const next = Math.min(maxDisplay, Math.max(0, Math.round(((Number(weight) || 0) + delta) * 10) / 10));
     setWeight(next ? String(next) : "");
+  };
+  // Clamp typed input to the 50 kg equivalent so the field can't exceed the cap.
+  const onWeightInput = (t) => {
+    const cleaned = cleanNumber(t, true);
+    if (cleaned !== "" && Number(cleaned) > maxDisplay) { setWeight(String(maxDisplay)); return; }
+    setWeight(cleaned);
   };
 
   // first-use popup — once per account (mirrors the AI Coach guide pattern)
@@ -256,7 +265,7 @@ export default function PoseTracker() {
               <TextInput
                 style={styles.weightInput}
                 value={weight}
-                onChangeText={(t) => setWeight(cleanNumber(t, true))}
+                onChangeText={onWeightInput}
                 keyboardType="decimal-pad"
                 placeholder="0"
                 placeholderTextColor={COLORS.placeholderText}

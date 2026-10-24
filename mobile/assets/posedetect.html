@@ -510,7 +510,7 @@
       if (R.stage === 'active') repFrame(o.formEvaluable, o.formBad, m, below ? 'min' : 'max');
       const entering = below ? (m < o.enter) : (m > o.enter);
       const exiting  = below ? (m > o.exit)  : (m < o.exit);
-      if (R.stage === 'ready' && entering) repStart(o.onActive);
+      if (R.stage === 'ready' && entering && o.canStart !== false) repStart(o.onActive);
       else if (R.stage === 'active' && exiting) repFinish({
         debounceMs: o.debounceMs, minActiveFrames: o.minActiveFrames, minEvalFrames: o.minEvalFrames,
         badRatio: o.badRatio, target: o.target, track: below ? 'min' : 'max',
@@ -1484,8 +1484,13 @@
           debounceMs: 300, onActive: () => sayActive('Stand up') });
       },
 
-      // 2. SUMO SQUAT — wider stance; depth target eased, geometry not assumed identical to squat.
+      // 2. SUMO SQUAT — a WIDE stance is the whole point, so a narrow (feet-together) squat must
+      // NOT count. A rep can only START when the ankles are clearly wider than the hips, measured
+      // front-on (both ankles + both hips visible). Depth/lean logic is otherwise the same as squat.
       sumosquat: function (keypoints) {
+        // Feet must be wider than this multiple of the hip width to qualify as a sumo stance.
+        // Shoulder-width (normal squat) sits ~1.4-1.6x hip width, so 1.7 rejects it; tune on-device.
+        const SUMO_STANCE_RATIO = 1.7;
         const S = pickSide(keypoints, ['hip', 'knee', 'ankle']);
         const hip = kp(keypoints, S + '_hip'), knee = kp(keypoints, S + '_knee');
         const ankle = kp(keypoints, S + '_ankle'), shoulder = kp(keypoints, S + '_shoulder');
@@ -1495,10 +1500,25 @@
         const leanEvaluable = !!shoulder;
         const leanDeg = shoulder ? verticalDeg(shoulder, hip) : 0;
         const leanBad = leanEvaluable && leanDeg > 45;
+
+        // STANCE GATE — needs both ankles and both hips (front-on). If we can't see them, or the
+        // feet aren't wide enough, the rep is blocked from starting so it can never be counted.
+        const la = kp(keypoints, 'left_ankle'), ra = kp(keypoints, 'right_ankle');
+        const lh = kp(keypoints, 'left_hip'),   rh = kp(keypoints, 'right_hip');
+        const stanceMeasurable = !!(la && ra && lh && rh);
+        const hipSpread = stanceMeasurable ? Math.max(Math.abs(lh.x - rh.x), 1) : 0;
+        const stanceRatio = stanceMeasurable ? Math.abs(la.x - ra.x) / hipSpread : 0;
+        const stanceWide = stanceMeasurable && stanceRatio > SUMO_STANCE_RATIO;
+
         setForm(leanEvaluable ? (leanBad ? 'bad' : 'good') : 'unknown', 'Keep your chest up');
-        debugEl.textContent = 'KNEE:' + Math.round(kneeAngle) + ' LEAN:' + Math.round(leanDeg) + '° ' + R.stage + ' good:' + count + ' bad:' + badCount + ' side:' + S;
+        debugEl.textContent = 'KNEE:' + Math.round(kneeAngle) + ' LEAN:' + Math.round(leanDeg) + '° stance:' +
+          (stanceMeasurable ? stanceRatio.toFixed(2) + (stanceWide ? ' WIDE' : ' narrow') : '?') +
+          ' ' + R.stage + ' good:' + count + ' bad:' + badCount + ' side:' + S;
+        // Nudge to widen the stance only while standing, so we don't nag mid-rep.
+        if (!stanceWide && R.stage === 'ready') sayActive(stanceMeasurable ? 'Step your feet wider' : 'Face the camera, feet in view');
         runRep({ metric: kneeAngle, activeWhenBelow: true, enter: 150, exit: 160, target: 110,
           incompleteMsg: 'Go deeper', formMsg: 'Keep your chest up', formEvaluable: leanEvaluable, formBad: leanBad,
+          canStart: stanceWide,
           debounceMs: 300, onActive: () => sayActive('Stand up') });
       },
 

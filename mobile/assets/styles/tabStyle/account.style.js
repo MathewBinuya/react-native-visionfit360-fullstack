@@ -27,6 +27,15 @@ const styles = StyleSheet.create({
     color: COLORS.black,
     fontFamily: "GeneralSans-Variable",
   },
+  // multiline bio editor — same box as `inputContainer`, taller and top-aligned
+  bioInput: {
+    minHeight: 88,
+    fontSize: 15,
+    color: COLORS.black,
+    paddingVertical: 12,
+    textAlignVertical: "top",
+    fontFamily: "GeneralSans-Variable",
+  },
   row: { flexDirection: "row", gap: 12 },
 
   // read-only field display (view mode + locked name/bio)

@@ -238,7 +238,7 @@ export default function Progress() {
           )}
           <View style={styles.statGrid}>
             <View style={styles.statCell}>
-              <Text style={styles.statValue}>{s.weekStreak} wk{s.weekStreak === 1 ? "" : "s"}</Text>
+              <Text style={styles.statValue}>{s.weekStreak} week{s.weekStreak === 1 ? "" : "s"}</Text>
               <Text style={styles.statLabel}>Weeks in a row</Text>
             </View>
             <View style={styles.statCell}>

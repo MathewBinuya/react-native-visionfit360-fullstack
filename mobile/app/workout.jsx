@@ -8,13 +8,15 @@ import { Ionicons } from "@expo/vector-icons"
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import COLORS from "../constants/colors"
 import styles from '../assets/styles/workout.style'
-import api from '../lib/axios'
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import { guideSeenKey } from '../lib/progress'
 import { useAuthStore } from '../store/authStore'
 import {
   loadActiveWorkouts,
   completeWorkout as completeWorkoutOffline,
+  createWorkoutOffline,
+  updateWorkoutOffline,
+  deleteWorkoutOffline,
   syncPending,
   getPending,
   onSyncComplete,
@@ -32,12 +34,12 @@ const OFFLINE_GUIDE_STEPS = [
   {
     icon: "cloud-offline-outline",
     title: "Works without internet",
-    text: "No Wi-Fi or mobile data? You can still open your routines and mark workouts complete — the tracker keeps working offline.",
+    text: "No Wi-Fi or mobile data? You can still create, edit and delete routines and mark workouts complete — the tracker keeps working offline.",
   },
   {
     icon: "checkmark-circle-outline",
-    title: "Complete anytime",
-    text: "Tap Mark Complete and it's saved on your device right away. No waiting for a connection, even at the gym.",
+    title: "Save anytime",
+    text: "Add or change a routine and it's saved on your device right away, no waiting for a connection — even at the gym.",
   },
   {
     icon: "sync-outline",
@@ -398,13 +400,20 @@ export default function Workout() {
           }))
         }))
       };
-      const res = await api.put(`/workouts/${editWorkout._id}`, payload);
-      setWorkouts(prev => prev.map(w => w._id === editWorkout._id ? res.data : w));
+      // Offline-capable: saves to the server when online, otherwise queues the edit
+      // (or folds it into a still-unsynced creation) and reflects it immediately.
+      const result = await updateWorkoutOffline(user, editWorkout, payload);
+      setWorkouts(prev => prev.map(w => w._id === editWorkout._id ? result.workout : w));
       setShowEdit(false);
       setEditWorkout(null);
+      if (result.status === "pending") {
+        setOnline(false);
+        await refreshPendingCount();
+      }
     } catch (error) {
       if (isOffline(error)) {
-        showAlert("You're offline", "Editing a routine needs a connection. You can still complete workouts offline — changes will save once you're back online.");
+        // A device-storage failure — the only way an offline edit can fail now.
+        showAlert("Couldn't save", "We couldn't save this change on your device. Please free up some space and try again.");
       } else {
         showAlert("Error", error.response?.data?.message || "Failed to save changes");
       }
@@ -439,26 +448,33 @@ export default function Workout() {
     }
   };
 
-  //  DELETE WORKOUT 
-  const confirmDelete = (id, title) => {
+  //  DELETE WORKOUT
+  const confirmDelete = (workout) => {
     setMenuWorkout(null);
     showAlert(
       "Delete workout",
-      `Remove "${title || "this workout"}"?`,
+      `Remove "${workout?.title || "this workout"}"?`,
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: () => deleteWorkout(id) },
+        { text: "Delete", style: "destructive", onPress: () => deleteWorkout(workout) },
       ]
     );
   };
 
-  const deleteWorkout = async (id) => {
+  const deleteWorkout = async (workout) => {
+    // Optimistic: it leaves the list immediately, online or not.
+    setWorkouts(prev => prev.filter(w => w._id !== workout._id));
     try {
-      await api.delete(`/workouts/${id}`);
-      setWorkouts(prev => prev.filter(w => w._id !== id));
+      const result = await deleteWorkoutOffline(user, workout);
+      if (result.status === "pending") {
+        setOnline(false);
+        await refreshPendingCount();
+      }
     } catch (error) {
+      // Put it back so nothing silently disappears on a storage/server failure.
+      setWorkouts(prev => [workout, ...prev]);
       if (isOffline(error)) {
-        showAlert("You're offline", "Deleting a routine needs a connection. Try again once you're back online.");
+        showAlert("Couldn't delete", "We couldn't save this change on your device. Please try again.");
       } else {
         showAlert("Error", error.response?.data?.message || "Failed to delete");
       }
@@ -496,12 +512,24 @@ export default function Workout() {
           }))
         })),
       };
-      const res = await api.post("/workouts", payload);
-      setWorkouts(prev => [res.data, ...prev]);
+      // Offline-capable: creates on the server when online, otherwise saves the
+      // routine locally (badged) and syncs it automatically once back online.
+      const result = await createWorkoutOffline(user, payload);
+      setWorkouts(prev => [result.workout, ...prev]);
       setShowAdd(false);
+      if (result.status === "pending") {
+        setOnline(false);
+        await refreshPendingCount();
+        showAlert(
+          "Saved offline",
+          "This routine is saved on your device and will sync automatically when you're back online.",
+          [{ text: "Got it" }]
+        );
+      }
     } catch (error) {
       if (isOffline(error)) {
-        showAlert("You're offline", "Creating a new routine needs a connection. You can still complete your existing workouts offline — they'll sync automatically.");
+        // A device-storage failure — the only way an offline create can fail now.
+        showAlert("Couldn't save", "We couldn't save this routine on your device. Please free up some space and try again.");
       } else {
         showAlert("Error", error.response?.data?.message || "Failed to save");
       }
@@ -556,6 +584,14 @@ export default function Workout() {
                   <Text style={styles.workoutDate}>
                     {new Date(w.date).toLocaleDateString()}
                   </Text>
+                  {w._pending && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                      <Ionicons name="cloud-offline-outline" size={13} color="#9A6400" />
+                      <Text style={{ fontSize: 12, color: '#9A6400', fontWeight: '600' }}>
+                        Saved offline · will sync
+                      </Text>
+                    </View>
+                  )}
                 </View>
                 {/* THREE DOTS */}
                 <TouchableOpacity
@@ -641,7 +677,7 @@ export default function Workout() {
 
               {/* DELETE */}
               <TouchableOpacity
-                onPress={() => confirmDelete(menuWorkout?._id, menuWorkout?.title)}
+                onPress={() => confirmDelete(menuWorkout)}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16 }}
               >
                 <Ionicons name="trash-outline" size={20} color="#E24B4A" />
