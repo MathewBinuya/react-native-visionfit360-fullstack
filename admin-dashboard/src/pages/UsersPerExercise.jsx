@@ -135,6 +135,7 @@ export default function UsersPerExercise() {
                   <div className="ex-usage">
                     <div className="ex-usage-head">
                       <span>Exercise</span>
+                      <span className="ex-usage-head-spacer" aria-hidden="true" />
                       <span className="ex-usage-metric">Users</span>
                       <span className="ex-usage-metric">Sessions</span>
                     </div>

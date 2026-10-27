@@ -356,7 +356,7 @@ tr.clickable:hover { background: var(--subtle); }
 .ex-usage-sessions { font-size: 14px; color: var(--muted); }
 @media (max-width: 680px) {
   .ex-usage-head, .ex-usage-row { grid-template-columns: 1fr 60px 70px; gap: 12px; }
-  .ex-usage-bar { display: none; }
+  .ex-usage-bar, .ex-usage-head-spacer { display: none; }
 }
 
 /* toolbar + search + selects */
