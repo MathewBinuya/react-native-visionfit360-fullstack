@@ -27,6 +27,7 @@ const GENDER_OPTIONS = ["male", "female", "other"];
 
 export default function Profile() {
   const user = useAuthStore((s) => s.user);
+  const setUser = useAuthStore((s) => s.setUser);
   const alert = useAlert();
 
   const [form, setForm] = useState({ name: "", bio: "", gender: "" });
@@ -144,7 +145,7 @@ export default function Profile() {
 
     setIsSaving(true);
     try {
-      await api.put("/profile", {
+      const res = await api.put("/profile", {
         name: form.name.trim(),
         bio: form.bio.trim(),
         gender: form.gender, // required
@@ -152,6 +153,9 @@ export default function Profile() {
         heightCm: Number(metricHeight),
         weightKg: Number(metricWeight),
       });
+      // refresh the local user so the next onboarding steps (BMI age check) and
+      // the dashboard greeting/avatar reflect what was just entered.
+      if (res?.data) await setUser(res.data);
       router.push("/(onBoarding)/goal");
     } catch (error) {
       alert("Error", error.response?.data?.message || "Failed to save");
