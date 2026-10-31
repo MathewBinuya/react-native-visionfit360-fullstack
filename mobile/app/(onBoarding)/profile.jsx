@@ -19,6 +19,8 @@ import {
   cmToFtIn, ftInToCm, kgToLb, lbToKg, cleanNumber, unitPrefKey,
   MIN_HEIGHT_CM, MAX_HEIGHT_CM, MIN_WEIGHT_KG, MAX_WEIGHT_KG,
 } from '../../lib/units';
+import DateField from '../../components/DateField';
+import { ageFromDob, isValidDob, maxBirthDate, minBirthDate, MIN_AGE, MAX_AGE } from '../../lib/age';
 
 
 const GENDER_OPTIONS = ["male", "female", "other"];
@@ -28,6 +30,7 @@ export default function Profile() {
   const alert = useAlert();
 
   const [form, setForm] = useState({ name: "", bio: "", gender: "" });
+  const [dob, setDob] = useState(null); // date of birth (we store DOB, derive age)
   const [isSaving, setIsSaving] = useState(false);
 
   // canonical metric values (what we send) — strings so inputs stay controlled
@@ -40,6 +43,14 @@ export default function Profile() {
   const [ftVal, setFtVal] = useState("");
   const [inVal, setInVal] = useState("");
   const [lbVal, setLbVal] = useState("");
+
+  // Pre-fill the display name with the username they chose at signup, so they
+  // don't have to type their name again here. It stays fully editable — they can
+  // change it to a different display name before continuing.
+  useEffect(() => {
+    const chosen = user?.name || user?.username;
+    if (chosen) setForm((f) => (f.name.trim() ? f : { ...f, name: chosen }));
+  }, [user?.name, user?.username]);
 
   // restore the user's saved unit preference
   useEffect(() => {
@@ -61,11 +72,12 @@ export default function Profile() {
     } catch (_e) {}
   };
 
-  // gender is REQUIRED now — name/bio/gender/height/weight are all needed to continue
+  // name/bio/gender/dob/height/weight are all needed to continue
   const isComplete =
     form.name.trim() !== "" &&
     form.bio.trim() !== "" &&
     GENDER_OPTIONS.includes(form.gender) &&
+    isValidDob(dob) &&
     metricHeight !== "" &&
     metricWeight !== "";
 
@@ -73,6 +85,8 @@ export default function Profile() {
     if (!form.name.trim()) return "Please enter your name";
     if (!form.bio.trim()) return "Please tell us a little about yourself";
     if (!GENDER_OPTIONS.includes(form.gender)) return "Please select your gender";
+    if (!dob) return "Please select your date of birth";
+    if (!isValidDob(dob)) return `Please enter a valid date of birth (age ${MIN_AGE}–${MAX_AGE})`;
     if (!metricHeight) return "Please enter your height";
     const h = Number(metricHeight);
     if (isNaN(h) || h < MIN_HEIGHT_CM || h > MAX_HEIGHT_CM)
@@ -134,6 +148,7 @@ export default function Profile() {
         name: form.name.trim(),
         bio: form.bio.trim(),
         gender: form.gender, // required
+        dateOfBirth: dob.toISOString(),
         heightCm: Number(metricHeight),
         weightKg: Number(metricWeight),
       });
@@ -222,6 +237,23 @@ export default function Profile() {
                   </TouchableOpacity>
                 ))}
               </View>
+            </View>
+
+            {/* Date of birth (required) — drives age-appropriate AI recommendations */}
+            <View style={styles.inputGroup}>
+              <View style={styles.labelRow}>
+                <Text style={styles.label}>Date of birth</Text>
+                {dob && isValidDob(dob) && (
+                  <Text style={styles.unitSuffix}>Age {ageFromDob(dob)}</Text>
+                )}
+              </View>
+              <DateField
+                value={dob}
+                onChange={setDob}
+                placeholder="Select your date of birth"
+                maximumDate={maxBirthDate()}
+                minimumDate={minBirthDate()}
+              />
             </View>
 
             {/* Height */}

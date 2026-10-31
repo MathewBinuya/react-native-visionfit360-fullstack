@@ -143,10 +143,10 @@ export default function Profile() {
         return;
       }
     }
-
     setSaving(true);
     try {
-      // gender intentionally omitted — the DB field stays untouched for existing users
+      // gender + dateOfBirth intentionally omitted — those are set once at
+      // onboarding and are not editable here; the DB fields stay untouched.
       await api.put("/profile", {
         name: trimmedName,
         bio: form.bio,
