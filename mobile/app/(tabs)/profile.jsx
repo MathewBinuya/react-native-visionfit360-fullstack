@@ -361,9 +361,9 @@ export default function Profile() {
             <Text style={styles.readValue}>{dob ? formatDob(dob) : "—"}</Text>
           </View>
         </View>
-        <View style={{ width: 96 }}>
+        <View style={{ flex: 1 }}>
           <View style={styles.readOnlyBox}>
-            <Text style={styles.readValue}>{age != null ? `${age} yrs` : "—"}</Text>
+            <Text style={styles.readValue}>{age != null ? `${age} years old` : "—"}</Text>
           </View>
         </View>
       </View>
