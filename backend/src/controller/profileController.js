@@ -17,6 +17,13 @@ export const updateProfile = async (req, res) => {
     const updates = { name, photo, bio, dateOfBirth, gender, heightCm, weightKg, goal };
     Object.keys(updates).forEach((k) => updates[k] === undefined && delete updates[k]);
 
+    // Date of birth is set-once: if the account already has one, never overwrite
+    // it (it drives the AI age-safety tiers). It can only be set when still empty.
+    if (updates.dateOfBirth !== undefined) {
+      const current = await User.findById(req.user.id).select("dateOfBirth");
+      if (current?.dateOfBirth) delete updates.dateOfBirth;
+    }
+
     const user = await User.findByIdAndUpdate(req.user.id, updates, {
       new: true,
       runValidators: true,
