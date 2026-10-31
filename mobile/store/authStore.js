@@ -1,6 +1,24 @@
 import { create } from "zustand";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Notifications from "expo-notifications";
 import { API_URL } from "../lib/api";
+import { ensureInboxOwner, resetInbox, clearInboxOwner } from "../lib/notifInbox";
+
+// expo-notifications is called directly here (not via lib/notifications) because
+// that module imports the axios instance, which imports this store — importing it
+// would create a cycle. This store only needs the one cancel call.
+const cancelScheduled = async () => {
+  try { await Notifications.cancelAllScheduledNotificationsAsync(); } catch (_e) {}
+};
+
+// Keep the in-app notification feed isolated per account on a shared device: when
+// the signed-in account changes, clear the feed and drop any OS reminders queued
+// for the previous account (they reschedule for the new one from the dashboard).
+const isolateNotificationsFor = async (userId) => {
+  try {
+    if (await ensureInboxOwner(userId)) await cancelScheduled();
+  } catch (_e) {}
+};
 
 
 export const useAuthStore = create((set) => ({
@@ -58,6 +76,7 @@ export const useAuthStore = create((set) => ({
 
       await AsyncStorage.setItem("user", JSON.stringify(data.user));
       await AsyncStorage.setItem("token", data.token);
+      await isolateNotificationsFor(data.user?.id);
 
       set({ token: data.token, user: data.user, isLoading: false });
 
@@ -119,6 +138,7 @@ export const useAuthStore = create((set) => ({
 
       await AsyncStorage.setItem("user", JSON.stringify(data.user));
       await AsyncStorage.setItem("token", data.token);
+      await isolateNotificationsFor(data.user?.id);
 
       set({ token: data.token, user: data.user, isLoading: false });
 
@@ -134,6 +154,10 @@ export const useAuthStore = create((set) => ({
       const token = await AsyncStorage.getItem("token");
       const userJson = await AsyncStorage.getItem("user");
       const user = userJson ? JSON.parse(userJson) : null;
+
+      // restoring a saved session: reconcile the feed owner (no-op for the same
+      // account; resets it if a different account's data somehow lingers).
+      if (user) await isolateNotificationsFor(user?.id);
 
       set({ token, user });
     } catch (error) {
@@ -158,6 +182,8 @@ export const useAuthStore = create((set) => ({
   logout: async () => {
     await AsyncStorage.removeItem("token");
     await AsyncStorage.removeItem("user");
+    // leave no trace of this account's notifications for the next sign-in
+    try { await resetInbox(); await clearInboxOwner(); await cancelScheduled(); } catch (_e) {}
     set({ token: null, user: null });
   },
 }));

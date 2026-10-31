@@ -58,3 +58,27 @@ export const unreadCount = async () => {
 export const markAllRead = async () => { await write(READ_KEY, Date.now()); };
 
 export const clearInbox = async () => { await write(INBOX_KEY, []); };
+
+// Wipe the entire feed (delivered + planned + read marker). Used when the
+// signed-in account changes on a shared device.
+export const resetInbox = async () => {
+  await Promise.all([write(INBOX_KEY, []), write(PLANNED_KEY, []), write(READ_KEY, 0)]);
+};
+
+// The feed lives in device storage, so tie it to one account. If the signed-in
+// user differs from the feed's recorded owner, start that account with a clean
+// feed. Returns true when it reset (i.e. the account actually changed), so the
+// caller can also cancel any OS-scheduled reminders from the previous account.
+const OWNER_KEY = "notifInboxOwner_v1";
+export const ensureInboxOwner = async (userId) => {
+  const id = userId == null ? "" : String(userId);
+  let owner = "";
+  try { owner = (await AsyncStorage.getItem(OWNER_KEY)) || ""; } catch (_e) {}
+  if (owner === id) return false;
+  await resetInbox();
+  try { await AsyncStorage.setItem(OWNER_KEY, id); } catch (_e) {}
+  return true;
+};
+
+// Forget the owner so the next sign-in is treated as a fresh account.
+export const clearInboxOwner = async () => { try { await AsyncStorage.removeItem(OWNER_KEY); } catch (_e) {} };
