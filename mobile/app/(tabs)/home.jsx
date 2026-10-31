@@ -14,7 +14,6 @@ import {
 } from '../../lib/notifications'
 import { reconcileInbox, unreadCount } from '../../lib/notifInbox'
 import ActivityCard from '../../components/ActivityCard'
-import { ageFromDob } from '../../lib/age'
 
 // one-time, per-device flag so the first-run notification ask shows only once
 const NOTIF_PRIME_KEY = 'notifPrimeSeen_v1';
@@ -153,11 +152,6 @@ export default function Home() {
         <View>
           <Text style={styles.hello}>Hello,</Text>
           <Text style={styles.username}>{user?.name || user?.username || "there"}</Text>
-          {ageFromDob(user?.dateOfBirth) != null && (
-            <Text style={{ fontSize: 12, color: COLORS.gray, marginTop: 2 }}>
-              Age {ageFromDob(user.dateOfBirth)}
-            </Text>
-          )}
         </View>
         <View style={styles.topBarRight}>
           {/* Notifications bell — opens the in-app feed; badge shows unread count */}
