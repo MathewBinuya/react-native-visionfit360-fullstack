@@ -25,11 +25,10 @@ const generateAdminToken = (id) =>
 
 // Explicit allow-list of user fields safe to expose to admins.
 // (Never leak password, currentToken, reset/verification codes, etc.)
-// dateOfBirth is intentionally omitted — it's no longer shown in the admin UI.
-// The field still exists on the schema and is used elsewhere (mobile profile,
-// AI age context); the admin simply doesn't read or display it.
+// dateOfBirth is shown in the admin (user detail + age demographics); age itself
+// is derived from it on the client, never stored.
 const SAFE_USER_FIELDS =
-  "name username email photo bio gender goal heightCm weightKg status onBoardingComplete isVerified createdAt updatedAt lastLoginAt lastActiveAt";
+  "name username email photo bio gender dateOfBirth goal heightCm weightKg status onBoardingComplete isVerified createdAt updatedAt lastLoginAt lastActiveAt";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -507,7 +506,7 @@ export const getUsers = async (req, res) => {
           { $limit: limit },
           {
             $project: {
-              name: 1, username: 1, email: 1, photo: 1, gender: 1, goal: 1,
+              name: 1, username: 1, email: 1, photo: 1, gender: 1, dateOfBirth: 1, goal: 1,
               status: 1, isVerified: 1, createdAt: 1, lastLoginAt: 1, lastActiveAt: 1,
             },
           },
@@ -612,6 +611,28 @@ export const getDashboard = async (req, res) => {
     const recentlyActiveThreshold = new Date(now.getTime() - RECENTLY_ACTIVE_WINDOW_MS);
     const accountActiveThreshold = new Date(now.getTime() - ACCOUNT_ACTIVE_DAYS * DAY_MS);
 
+    // Exact whole-year age from dateOfBirth (Manila calendar), computed in-pipeline:
+    // year difference minus 1 if this year's birthday hasn't happened yet.
+    const AGE_EXPR = {
+      $let: {
+        vars: {
+          y: { $subtract: [{ $year: { date: now, timezone: TZ } }, { $year: { date: "$dateOfBirth", timezone: TZ } }] },
+          hadBirthday: {
+            $or: [
+              { $gt: [{ $month: { date: now, timezone: TZ } }, { $month: { date: "$dateOfBirth", timezone: TZ } }] },
+              {
+                $and: [
+                  { $eq: [{ $month: { date: now, timezone: TZ } }, { $month: { date: "$dateOfBirth", timezone: TZ } }] },
+                  { $gte: [{ $dayOfMonth: { date: now, timezone: TZ } }, { $dayOfMonth: { date: "$dateOfBirth", timezone: TZ } }] },
+                ],
+              },
+            ],
+          },
+        },
+        in: { $subtract: ["$$y", { $cond: ["$$hadBirthday", 0, 1] }] },
+      },
+    };
+
     const [
       totalUsers,
       newUsers,
@@ -651,7 +672,30 @@ export const getDashboard = async (req, res) => {
             gender: [
               { $group: { _id: { $ifNull: ["$gender", "Not specified"] }, count: { $sum: 1 } } },
             ],
-            // (Age demographics intentionally omitted — Age is not shown in the admin.)
+            // age bands — only users with a date of birth on file are counted
+            age: [
+              { $match: { dateOfBirth: { $ne: null } } },
+              { $addFields: { _age: AGE_EXPR } },
+              {
+                $addFields: {
+                  ageBand: {
+                    $switch: {
+                      branches: [
+                        { case: { $lt: ["$_age", 13] }, then: "Under 13" },
+                        { case: { $lt: ["$_age", 18] }, then: "13–17" },
+                        { case: { $lt: ["$_age", 25] }, then: "18–24" },
+                        { case: { $lt: ["$_age", 35] }, then: "25–34" },
+                        { case: { $lt: ["$_age", 45] }, then: "35–44" },
+                        { case: { $lt: ["$_age", 55] }, then: "45–54" },
+                        { case: { $lt: ["$_age", 65] }, then: "55–64" },
+                      ],
+                      default: "65+",
+                    },
+                  },
+                },
+              },
+              { $group: { _id: "$ageBand", count: { $sum: 1 } } },
+            ],
             bmiCategories: [
               {
                 $addFields: {
@@ -782,6 +826,7 @@ export const getDashboard = async (req, res) => {
       },
       demographics: {
         gender: demo.gender || [],
+        age: demo.age || [],
         bmiCategories: demo.bmiCategories || [],
         body: (demo.body && demo.body[0]) || null,
       },

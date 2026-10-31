@@ -64,6 +64,41 @@ const BMI_GUIDANCE = {
     "BMI guidance (obesity range): prioritise low-impact moves (avoid high-impact cardio like Jumping Jacks / High Knees unless the user asks or their history shows they handle it), moderate sets/reps, longer rest (90–120s), build volume gradually.",
 };
 
+// --- Age-based safety tiers --------------------------------------------------
+// Youth strength-training guidance follows the NSCA / AAP consensus: resistance
+// training IS safe for children and adolescents, provided it stays submaximal,
+// technique-focused, and avoids maximal (1RM) / heavy loads before skeletal
+// maturity (the growth-plate concern). Younger => lighter, bodyweight-first.
+// VisionFit is unsupervised (AR rep counter, no coach present), so for minors we
+// also HARD-CAP the weight the AI can prescribe — the prompt guidance below is
+// reinforced by weight clamping in sanitizeExercises so an off-prompt heavy
+// load can never reach a young user. The kg caps are pragmatic app-level safety
+// limits, NOT medical thresholds — tune freely.
+const AGE_TIERS = {
+  child:      { weightCapKg: 5 },    // under 13 (pre-adolescent)
+  adolescent: { weightCapKg: 20 },   // 13–17
+  adult:      { weightCapKg: 500 },  // 18+ — existing default, unrestricted
+};
+
+const ageTier = (age) => {
+  if (age == null) return "adult"; // unknown age => no age-based restriction
+  if (age <= 12) return "child";
+  if (age <= 17) return "adolescent";
+  return "adult";
+};
+
+const AGE_GUIDANCE = {
+  child:
+    "Age: under 13 (pre-adolescent). SAFETY — keep it technique-first and bodyweight-focused. " +
+    "Prefer bodyweight exercises; for any weighted exercise use a very light load (5 kg max) with higher-rep, submaximal sets. " +
+    "NEVER program maximal or heavy lifts. Prioritise good form and movement skill over load.",
+  adolescent:
+    "Age: 13–17 (adolescent). SAFETY — resistance training is fine but must be submaximal and progressive. " +
+    "Keep loads moderate (20 kg max on weighted exercises), roughly 8–15 reps, with adequate rest. " +
+    "NEVER program maximal (1RM) or near-maximal attempts — the skeleton is still developing.",
+  adult: null, // 18+ — standard behaviour, no extra restriction line
+};
+
 // Gender is ONE soft factor: it may nudge emphasis, never restrict or change difficulty.
 const GENDER_GUIDANCE = {
   female:
@@ -130,7 +165,12 @@ const buildUserContext = async (userId) => {
   }
 
   const age = ageFrom(user?.dateOfBirth);
-  if (age) lines.push(`Age: ${age}.`);
+  const tier = ageTier(age);
+  const weightCap = AGE_TIERS[tier].weightCapKg;
+  if (age) {
+    lines.push(`Age: ${age}.`);
+    if (AGE_GUIDANCE[tier]) lines.push(AGE_GUIDANCE[tier]);
+  }
 
   lines.push(GENDER_GUIDANCE[user?.gender] || "Gender: unspecified — no gender-based emphasis.");
   lines.push(GOAL_GUIDANCE[user?.goal] || GOAL_GUIDANCE.get_fit);
@@ -152,11 +192,14 @@ const buildUserContext = async (userId) => {
     lines.push(`Heaviest recorded weights: ${best.join(", ")}. Base suggested weights on these — progress by small steps (about 1–2.5 kg or 1–2 reps) only when appropriate, never large jumps.`);
   }
 
-  return (
+  const text =
     `User profile:\n- ${lines.join("\n- ")}\n` +
     `Combine ALL of these factors. Gender is only one soft factor — the user can train any muscle group and any supported exercise. BMI is not a medical diagnosis. ` +
-    `If there's little history, start conservatively and beginner-friendly. Avoid repeating the exact same focus as the most recent session when possible. Always prioritise good form over load.`
-  );
+    `Age safety guidance (when present) is a HARD constraint, not a suggestion. ` +
+    `If there's little history, start conservatively and beginner-friendly. Avoid repeating the exact same focus as the most recent session when possible. Always prioritise good form over load.`;
+
+  // weightCap feeds the server-side weight clamp (defense-in-depth for minors).
+  return { text, age, weightCap };
 };
 
 const CATALOG_RULE =
@@ -177,17 +220,19 @@ const clampFloat = (n, lo, hi, dflt) => {
   return Math.min(hi, Math.max(lo, Math.round(x * 10) / 10));
 };
 
-const sanitizeSets = (sets, weighted) =>
+const sanitizeSets = (sets, weighted, maxWeightKg = 500) =>
   (Array.isArray(sets) ? sets : [])
     .slice(0, 12)
     .map((s) => ({
       reps: clampInt(s?.reps, 1, 100, 10),
-      weightKg: weighted ? clampFloat(s?.weightKg, 0, 500, 0) : 0,
+      // weight is clamped to the age-tier cap (see AGE_TIERS) so a minor can
+      // never be prescribed a heavy load, even if the model ignores the prompt.
+      weightKg: weighted ? clampFloat(s?.weightKg, 0, maxWeightKg, 0) : 0,
       restSeconds: clampInt(s?.restSeconds, 0, 600, 60),
     }));
 
 // Only exercises VisionFit supports survive; names are normalised to the catalog.
-const sanitizeExercises = (exercises) =>
+const sanitizeExercises = (exercises, maxWeightKg = 500) =>
   (Array.isArray(exercises) ? exercises : [])
     .filter((e) => e && typeof e.name === "string" && e.name.trim())
     .map((e) => ({ ...e, name: canonicalExerciseName(e.name) }))
@@ -195,7 +240,7 @@ const sanitizeExercises = (exercises) =>
     .slice(0, 15)
     .map((e) => {
       const weighted = EXERCISE_CATALOG.find((c) => c.name === e.name)?.kind === "weighted";
-      return { name: e.name, sets: sanitizeSets(e.sets, weighted) };
+      return { name: e.name, sets: sanitizeSets(e.sets, weighted, maxWeightKg) };
     })
     .filter((e) => e.sets.length > 0);
 
@@ -237,7 +282,7 @@ const workoutRecommendationSchema = {
 
 export const recommendWorkout = async (req, res) => {
   try {
-    const context = await buildUserContext(req.user.id);
+    const { text: context, weightCap } = await buildUserContext(req.user.id);
 
     const prompt = `You are a friendly, encouraging fitness coach. ${context}
 ${CATALOG_RULE}
@@ -256,8 +301,9 @@ Recommend a single workout for today built specifically for THIS person — choo
       return res.status(500).json({ message: "Could not generate recommendation. Please try again." });
     }
 
-    // validate + clamp; fall back safely if nothing usable survives
-    const exercises = sanitizeExercises(parsed.exercises);
+    // validate + clamp (weights capped to the user's age tier); fall back safely
+    // if nothing usable survives
+    const exercises = sanitizeExercises(parsed.exercises, weightCap);
     if (!exercises.length) {
       console.log("AI recommendation had no valid exercises after sanitation");
       return res.status(500).json({ message: "Could not generate recommendation. Please try again." });
@@ -329,7 +375,7 @@ const chatResponseSchema = {
 export const chatWithCoach = async (req, res) => {
   try {
     const { messages } = req.body;
-    const context = await buildUserContext(req.user.id);
+    const { text: context, weightCap } = await buildUserContext(req.user.id);
 
     const trimmed = Array.isArray(messages) ? messages.slice(-10) : [];
 
@@ -364,7 +410,7 @@ export const chatWithCoach = async (req, res) => {
     const reply = sanitizeText(parsed.reply, 2000) || "Sorry, I couldn't put that together. Try again.";
 
     if (parsed.responseType === "workout") {
-      const exercises = sanitizeExercises(parsed.exercises);
+      const exercises = sanitizeExercises(parsed.exercises, weightCap);
       // Only return a workout if valid exercises survived validation; otherwise
       // degrade gracefully to a plain chat reply (preserves the response shape).
       if (exercises.length) {
