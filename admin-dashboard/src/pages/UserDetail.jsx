@@ -5,6 +5,7 @@ import { RatingStars, Avatar, StateBlock, Pagination, TableScroll } from "../com
 import api from "../lib/api";
 import {
   relativeTime, dateTime, shortDate, bmiInfo, exerciseLabel, displayName, accountStatus,
+  ageFromDob, birthDate,
 } from "../lib/format";
 
 const GOAL_LABELS = {
@@ -84,6 +85,8 @@ export default function UserDetail() {
                 <div className="card">
                   <h3 className="card-title">Body &amp; demographics</h3>
                   <Row label="Gender" value={u.gender ? u.gender.charAt(0).toUpperCase() + u.gender.slice(1) : null} />
+                  <Row label="Birth date" value={u.dateOfBirth ? birthDate(u.dateOfBirth) : null} />
+                  <Row label="Age" value={ageFromDob(u.dateOfBirth)} />
                   <Row label="Height" value={u.heightCm ? `${u.heightCm} cm` : null} />
                   <Row label="Weight" value={u.weightKg ? `${u.weightKg} kg` : null} />
                   <Row label="BMI" value={bmi ? `${bmi.bmi} (${bmi.category})` : null} />

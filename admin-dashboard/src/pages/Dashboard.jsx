@@ -15,6 +15,7 @@ const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 const NOT_SPECIFIED = "Not specified";
 const GENDER_ORDER = ["male", "female", "other"];
 const BMI_ORDER = ["Underweight", "Normal", "Overweight", "Obese"];
+const AGE_ORDER = ["Under 13", "13–17", "18–24", "25–34", "35–44", "45–54", "55–64", "65+"];
 
 // turn a [{_id,count}] breakdown into ordered BarChart rows.
 // Users with no data on file ("Not specified") are dropped from the view.
@@ -25,6 +26,17 @@ const toBars = (arr, order, labelFn = (x) => x) => {
     if (!order.includes(d._id) && d._id !== NOT_SPECIFIED) rows.push({ label: labelFn(d._id), value: d.count });
   }
   return rows;
+};
+
+// age bands with the share of users shown alongside the count (e.g. "12 · 40%")
+const toAgeBars = (arr) => {
+  const map = new Map((arr || []).map((d) => [d._id, d.count]));
+  const total = (arr || []).reduce((sum, d) => sum + d.count, 0);
+  return AGE_ORDER.filter((k) => map.has(k)).map((k) => ({
+    label: k,
+    value: map.get(k),
+    sub: total ? `${Math.round((map.get(k) / total) * 100)}%` : "0%",
+  }));
 };
 
 function Kpi({ label, value, hint }) {
@@ -191,6 +203,8 @@ export default function Dashboard() {
             <Panel title="Demographics" meta="excludes users with no data on file">
               <div className="subhead">Gender</div>
               <Breakdown rows={toBars(demo.gender, GENDER_ORDER, cap)} />
+              <div className="subhead">Age</div>
+              <Breakdown rows={toAgeBars(demo.age)} />
               <div className="subhead">BMI category</div>
               <Breakdown rows={toBars(demo.bmiCategories, BMI_ORDER)} />
               <div className="inline-stats">

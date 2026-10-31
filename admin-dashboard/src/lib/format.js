@@ -51,6 +51,24 @@ export const shortDate = (value) =>
 
 export const dateTime = (value) => (value ? new Date(value).toLocaleString() : "—");
 
+// full birth date, e.g. "Jan 5, 2010"; "—" when not on file
+export const birthDate = (value) =>
+  value ? new Date(value).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—";
+
+// whole-year age from a date of birth; null if missing/invalid
+export const ageFromDob = (value) => {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - d.getFullYear();
+  const hadBirthday =
+    now.getMonth() > d.getMonth() ||
+    (now.getMonth() === d.getMonth() && now.getDate() >= d.getDate());
+  if (!hadBirthday) age--;
+  return age >= 0 && age < 130 ? age : null;
+};
+
 // presence status -> { label, className }
 export const PRESENCE_META = {
   active: { label: "Active", className: "badge-presence-active" },

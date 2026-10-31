@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import { Avatar, StateBlock, Pagination, TableScroll } from "../components/ui";
 import api from "../lib/api";
-import { relativeTime, displayName, accountStatus, lastSeen, ACCOUNT_ACTIVE_DAYS } from "../lib/format";
+import { relativeTime, displayName, accountStatus, lastSeen, ageFromDob, birthDate, ACCOUNT_ACTIVE_DAYS } from "../lib/format";
 
 const PAGE_SIZE = 10;
 
@@ -94,6 +94,7 @@ export default function Users() {
                   <tr>
                     <th>User</th>
                     <th>Email</th>
+                    <th className="col-center">Age</th>
                     <th className="col-center">Status</th>
                     <th className="col-right">Last active</th>
                     <th className="col-right">Actions</th>
@@ -103,6 +104,7 @@ export default function Users() {
                   {users.map((u) => {
                     const st = accountStatus(u);
                     const seen = lastSeen(u);
+                    const age = ageFromDob(u.dateOfBirth);
                     return (
                       <tr key={u._id} className="clickable" onClick={() => navigate(`/users/${u._id}`)}>
                         <td>
@@ -115,6 +117,16 @@ export default function Users() {
                           </div>
                         </td>
                         <td className="muted">{u.email}</td>
+                        <td className="col-center">
+                          {age != null ? (
+                            <div className="user-id">
+                              <span className="user-id-name">{age}</span>
+                              <span className="user-id-handle">{birthDate(u.dateOfBirth)}</span>
+                            </div>
+                          ) : (
+                            <span className="muted">—</span>
+                          )}
+                        </td>
                         <td className="col-center"><span className={`badge ${st.className}`}>{st.label}</span></td>
                         <td className="muted col-right">{seen ? relativeTime(seen) : "Never"}</td>
                         <td className="col-right">
