@@ -13,6 +13,8 @@ import {
   cmToFtIn, ftInToCm, kgToLb, lbToKg, cleanNumber, unitPrefKey,
   MIN_HEIGHT_CM, MAX_HEIGHT_CM, MIN_WEIGHT_KG, MAX_WEIGHT_KG,
 } from '../../lib/units'
+import DateField from '../../components/DateField'
+import { ageFromDob, isValidDob, formatDob, maxBirthDate, minBirthDate, MIN_AGE, MAX_AGE } from '../../lib/age'
 
 export default function Profile() {
   const user = useAuthStore((s) => s.user);
@@ -32,6 +34,10 @@ export default function Profile() {
   // canonical metric values (what we send)
   const [metricHeight, setMetricHeight] = useState("");
   const [metricWeight, setMetricWeight] = useState("");
+  // Date of birth is set once. `dobLocked` = the server already has one, so it's
+  // read-only; older accounts with none can set it a single time while editing.
+  const [dob, setDob] = useState(null);
+  const [dobLocked, setDobLocked] = useState(false);
 
   // display units + per-unit input fields
   const [heightUnit, setHeightUnit] = useState("cm");
@@ -81,6 +87,8 @@ export default function Profile() {
       setForm({ name: res.data.name || "", bio: res.data.bio || "" });
       setMetricHeight(h);
       setMetricWeight(w);
+      setDob(res.data.dateOfBirth ? new Date(res.data.dateOfBirth) : null);
+      setDobLocked(!!res.data.dateOfBirth);
       if (hUnit === "ft") { const { ft, in: inch } = cmToFtIn(h); setFtVal(ft); setInVal(inch); }
       if (wUnit === "lb") setLbVal(kgToLb(w));
       setPhoto(res.data.photo || "");
@@ -143,13 +151,20 @@ export default function Profile() {
         return;
       }
     }
+    // date of birth: only sent when setting it for the first time (not locked)
+    const settingDob = !dobLocked && dob != null;
+    if (settingDob && !isValidDob(dob)) {
+      alert("Invalid date of birth", `Please enter a valid date of birth (age ${MIN_AGE}–${MAX_AGE}).`);
+      return;
+    }
     setSaving(true);
     try {
-      // gender + dateOfBirth intentionally omitted — those are set once at
-      // onboarding and are not editable here; the DB fields stay untouched.
+      // gender is omitted (set at onboarding). dateOfBirth is set-once: sent only
+      // when the account doesn't have one yet; the backend also enforces the lock.
       await api.put("/profile", {
         name: trimmedName,
         bio: form.bio,
+        dateOfBirth: settingDob ? dob.toISOString() : undefined,
         heightCm: metricHeight ? Number(metricHeight) : undefined,
         weightKg: metricWeight ? Number(metricWeight) : undefined,
       });
@@ -182,6 +197,9 @@ export default function Profile() {
     setEditing(false);
     await loadProfile();
   };
+
+  // derived age (never stored) — shown read-only beside the birthdate
+  const age = ageFromDob(dob);
 
   // read-only display strings (shown in view mode and for the locked fields)
   const heightDisplay = heightUnit === "ft"
@@ -330,6 +348,44 @@ export default function Profile() {
             maxLength={160}
             multiline
           />
+        </View>
+      )}
+
+      {/* Birthdate + Age — read-only and locked once set. Accounts without a DOB
+          (older users) can set it once while editing; after saving it locks. */}
+      <View style={styles.labelRow}>
+        <Text style={styles.label}>Birthdate &amp; age</Text>
+        {dobLocked && (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+            <Ionicons name="lock-closed" size={12} color={COLORS.placeholderText} />
+            <Text style={styles.unitSuffix}>Locked</Text>
+          </View>
+        )}
+      </View>
+      <View style={{ flexDirection: "row", gap: 10 }}>
+        <View style={{ flex: 1 }}>
+          <View style={styles.readOnlyBox}>
+            <Text style={styles.readValue}>{dob ? formatDob(dob) : "—"}</Text>
+          </View>
+        </View>
+        <View style={{ width: 96 }}>
+          <View style={styles.readOnlyBox}>
+            <Text style={styles.readValue}>{age != null ? `${age} yrs` : "—"}</Text>
+          </View>
+        </View>
+      </View>
+      {editing && !dobLocked && (
+        <View style={{ marginTop: 10 }}>
+          <DateField
+            value={dob}
+            onChange={setDob}
+            placeholder="Select your date of birth"
+            maximumDate={maxBirthDate()}
+            minimumDate={minBirthDate()}
+          />
+          <Text style={{ fontSize: 12, color: COLORS.placeholderText, marginTop: 6 }}>
+            You can set this once. After you save, it can&apos;t be changed.
+          </Text>
         </View>
       )}
 
