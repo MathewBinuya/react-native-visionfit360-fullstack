@@ -351,17 +351,9 @@ export default function Profile() {
         </View>
       )}
 
-      {/* Birthdate + Age — read-only and locked once set. Accounts without a DOB
-          (older users) can set it once while editing; after saving it locks. */}
-      <View style={styles.labelRow}>
-        <Text style={styles.label}>Birthdate &amp; age</Text>
-        {dobLocked && (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-            <Ionicons name="lock-closed" size={12} color={COLORS.placeholderText} />
-            <Text style={styles.unitSuffix}>Locked</Text>
-          </View>
-        )}
-      </View>
+      {/* Birthdate + Age — read-only once set. Accounts without a DOB (older users)
+          can set it once while editing; after saving it stays fixed. */}
+      <Text style={styles.label}>Birthdate &amp; age</Text>
       <View style={{ flexDirection: "row", gap: 10 }}>
         <View style={{ flex: 1 }}>
           <View style={styles.readOnlyBox}>
