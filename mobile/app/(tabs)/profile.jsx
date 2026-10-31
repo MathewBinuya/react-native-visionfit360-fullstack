@@ -354,7 +354,8 @@ export default function Profile() {
       {/* Birthdate + Age — read-only once set. Accounts without a DOB (older users)
           can set it once while editing; after saving it stays fixed. */}
       <Text style={styles.label}>Birthdate &amp; age</Text>
-      <View style={{ flexDirection: "row", gap: 10 }}>
+      {/* dimmed slightly to read as non-editable info */}
+      <View style={{ flexDirection: "row", gap: 10, opacity: 0.55 }}>
         <View style={{ flex: 1 }}>
           <View style={styles.readOnlyBox}>
             <Text style={styles.readValue}>{dob ? formatDob(dob) : "—"}</Text>
